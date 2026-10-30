@@ -1,6 +1,6 @@
 # 电脑投屏到千问 AI 眼镜：调研记录（2026-10-23～10-28）
 
-> **先读这里**：这是按日期记录的实验笔记，保留了当时的推测、弯路和后来被推翻的结论，后面的小节经常更正前面的说法，单独摘出来的某一句可能已经过时。**glasscast 现在的行为和用法以 [README.md](../README.md) 和 [docs/platform-setup.md](platform-setup.md) 为准**；真机上的最终结论汇总在 §1 开头。
+> **先读这里**：这是按日期记录的实验笔记，保留了当时的推测、弯路和后来被推翻的结论，后面的小节经常更正前面的说法，单独摘出来的某一句可能已经过时。**glasscast 现在的行为和用法以 [docs/usage.md](usage.md) 和 [docs/platform-setup.md](platform-setup.md) 为准**；真机上的最终结论汇总在 §1 开头。
 >
 > 文中"用户"指做真机测试的人；"官方文档第 N 节"指千问 AI 硬件开放平台文档（<https://device.qianwen.com/docs>）按 2026-10 目录顺序的章节编号；探针页面和实验文件在 `reference/`（说明见 [reference/README.md](../reference/README.md)），使用 glasscast 不需要它们。
 

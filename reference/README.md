@@ -2,7 +2,7 @@
 
 这里是做 glasscast 时留下的实验服务器、探针页面和被淘汰的设计，配合 [docs/research.md](../docs/research.md) 看。
 **使用 glasscast 不需要这个目录**：要上传到平台的页面在 `pages/`，技能在 `skill/`，步骤见
-[README.md](../README.md) 和 [docs/platform-setup.md](../docs/platform-setup.md)。
+[docs/usage.md](../docs/usage.md) 和 [docs/platform-setup.md](../docs/platform-setup.md)。
 
 这些文件都是当时的原样（注释里的结论是写文件那一刻的判断，可能已经被 research.md 后面的小节更正），不要直接拿来替换
 `pages/` 下的页面。注释里"临时放进平台 `Pages/cast-emit`"是指当时在实验技能里借用同一个页面名做真机测试。

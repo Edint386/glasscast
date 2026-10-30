@@ -573,7 +573,7 @@ sudo tail -n 50 /var/log/nginx/glasscast-error.log
 
 **适用**：还没有服务器，只想快速验证能不能跑通。这会把本机服务暴露到一个公开的随机域名上。
 
-先按 [README §5](../README.md#5-完整部署清单) 第 3 步建好 `.env`（`cp .env.example .env` 并填 `GLASSCAST_TOKEN`；`GLASSCAST_PUBLIC_URL` 会被下面的 `--public-url` 覆盖）。
+先按 [使用手册 §5](usage.md#5-完整部署清单) 第 3 步建好 `.env`（`cp .env.example .env` 并填 `GLASSCAST_TOKEN`；`GLASSCAST_PUBLIC_URL` 会被下面的 `--public-url` 覆盖）。
 
 装好 cloudflared，在终端 1 启动隧道，输出里找 `https://<随机>.trycloudflare.com`：
 
