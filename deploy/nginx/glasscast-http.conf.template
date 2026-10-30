@@ -1,0 +1,28 @@
+# glasscast：__DOMAIN__ 的 80 端口 vhost（docs/deploy.md 方案 A）。
+#
+# 由 deploy/server-setup.sh 从 deploy/nginx/glasscast-http.conf.template 渲染后放进 conf.d。
+# 手工使用见 docs/deploy.md「手工部署」。
+# 作用：
+#   1. 只放行 Let's Encrypt 的 HTTP-01 校验路径：certbot --webroot 往 webroot 里写校验文件，
+#      这里的 root 就是 nginx 看到的同一个目录；
+#   2. 其余请求一律 301 到 https（眼镜和平台都只走 https）。
+# 只用到 core / rewrite / log 模块的标准指令。
+
+server {
+    listen 80;
+    server_name __DOMAIN__;
+    server_tokens off;
+
+    access_log off;
+    error_log __ERROR_LOG__ warn;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root __ACME_ROOT__;
+        default_type text/plain;
+        try_files $uri =404;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}

@@ -1,0 +1,40 @@
+<view xmlns:a="waft://dsl" width="100%" height="100%" flex-flow="column" bg-color="#000000">
+  <!--
+    glasscast 流畅模式页面 cast-emit（页面名 = 本目录名）：用 emit 事件倒数当节拍器，倒数到 0 才换一张图。
+    真机验证过的写法（research.md 9.19、9.20），旧的每圈刷新版本在 reference/experiments/cast_emit/ 里，真机不出画面。
+
+    原理：
+      页面给自己发事件 emit://event/dN?n=N，每收到一次就把 n 减一再发出去。计数放在事件参数里、不写 data，
+      所以倒数过程中没有任何绑定刷新，不会打断正在加载的图片（真机上每次刷新都会让图片从头加载）。
+      event 的 match 是前缀匹配，d1 到 d9 按 n 的首位数字分流；只有 n 到 0 时 d0 才匹配，这时写一次换图编号 g
+      （唯一一次刷新，图片换地址），再从 m 开始下一轮倒数。
+      m = hops 乘 3，hops 由 start_cast 的出参经 dataSource 下发，缺省 25，即 75 步。
+      真机每步约 13 毫秒，再加上每张图的下载和蓝牙传输，实际张数低于 fps 设置：
+      设到 4 时每张图间隔约 630 到 720 毫秒，约每秒 1.5 张，这是实测的稳定上限，再高会进入换图太快、一张都显示不完的卡住状态。
+
+    写法约束：
+      所有 URI 属性都以 scheme 开头（emit、data、event），平台保存校验 URI-001 才放行。
+      data 里只放小整数：真机把超过 2147483647 的数卡在这个上限。会话号 s 取打开时的月日时分秒，每次打开都是新地址。
+      图片地址必须以 .jpg 结尾，真机不显示带问号参数的地址。属性里不能写小于号和 and 号。
+      图片框写死 640 乘 290：S1 的页面画布就是这么大，系统把它放在视野左上角。
+      右下角的数字是换图编号，看它是否还在增加就知道画面有没有在更新。
+  -->
+  <page-meta screen-awake="keep"/>
+  <data s="0" g="0" m="75"/>
+  <lifecycle-event on-load="data://update?s={{f:formatDate('now','MMddHHmmss')}}"/>
+  <lifecycle-event a:if="{{hops != 0}}" on-load="data://update?m={{hops * 3}}" on-new-intent="data://update?m={{hops * 3}}"/>
+  <lifecycle-event on-load="emit://event/d10?n=10"/>
+  <event match="event://d1" action="emit://event/d{{e:n - 1}}?n={{e:n - 1}}"/>
+  <event match="event://d2" action="emit://event/d{{e:n - 1}}?n={{e:n - 1}}"/>
+  <event match="event://d3" action="emit://event/d{{e:n - 1}}?n={{e:n - 1}}"/>
+  <event match="event://d4" action="emit://event/d{{e:n - 1}}?n={{e:n - 1}}"/>
+  <event match="event://d5" action="emit://event/d{{e:n - 1}}?n={{e:n - 1}}"/>
+  <event match="event://d6" action="emit://event/d{{e:n - 1}}?n={{e:n - 1}}"/>
+  <event match="event://d7" action="emit://event/d{{e:n - 1}}?n={{e:n - 1}}"/>
+  <event match="event://d8" action="emit://event/d{{e:n - 1}}?n={{e:n - 1}}"/>
+  <event match="event://d9" action="emit://event/d{{e:n - 1}}?n={{e:n - 1}}"/>
+  <event match="event://d0?" action="data://update?g={{d:g + 1}}"/>
+  <event match="event://d0?" action="emit://event/d{{d:m}}?n={{d:m}}"/>
+  <image a:if="{{d:s != 0}}" src="{{url}}{{structuredContent.url}}/{{d:s}}_{{d:g}}.jpg" width="640" height="290" image-fit="stretch"/>
+  <label text="{{d:g}}" font-size="16" color="#FFFFFF" height="20" floating="true" left="596" top="268"/>
+</view>

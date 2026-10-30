@@ -1,0 +1,16 @@
+# glasscast：证书续期（仅 1Panel 变体：server-setup.sh --flavor 1panel；由 glasscast-cert-renew.timer 触发）
+# 系统自带 nginx（默认变体）不用这个单元：证书由 certbot 自带的定时任务续期，
+# server-setup.sh 装的 deploy hook 负责续期后 reload nginx。
+#
+# 安装位置：/etc/systemd/system/glasscast-cert-renew.service（由 deploy/server-setup.sh 安装）
+# 手动触发：systemctl start glasscast-cert-renew.service
+# 查看日志：journalctl -u glasscast-cert-renew.service -n 50
+[Unit]
+Description=Renew Let's Encrypt certificate for glasscast (1Panel OpenResty)
+# 用 Wants 而不是 Requires：docker 单元名不同（如 snap 版）时也不至于让续期单元直接失败。
+Wants=network-online.target docker.service
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/glasscast/renew-cert.sh

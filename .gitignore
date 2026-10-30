@@ -1,0 +1,36 @@
+# Python / uv
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+dist/
+build/
+*.egg-info/
+
+# 本地配置（含 Token、图片地址 key），不要提交
+.env
+.env.*
+!.env.example
+*.local.*
+
+# 证书和私钥（局域网直连的证书副本等），不要提交
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# 根目录下的截屏测试图和临时输出，可能含屏幕内容（glasscast snapshot test.jpg 等）
+# 只匹配仓库根目录，tests/fixtures/ 下的测试文件不受影响
+/*.jpg
+/*.png
+/*.gif
+/*.fset
+/out/
+
+# 模拟器内核：运行 tools/simulator/fetch_assets.sh 从官方 CDN 下载
+tools/simulator/assets/
+
+# 系统文件
+.DS_Store

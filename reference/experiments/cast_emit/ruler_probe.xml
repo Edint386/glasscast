@@ -1,0 +1,24 @@
+<view xmlns:a="waft://dsl" width="100%" height="100%" bg-color="#000000" border-width="2" border-color="#FFFFFF">
+  <!-- glasscast 屏幕标尺（research.md 9.20）：量眼镜页面实际可用的宽高和偏移。外圈白框 = 根 view（100%×100%）的边；细框 = 固定 640×290 的 view；上排 |100…|900 的竖线在 x=100…900，左列 —50…—500 的横线在 y=50…500。第二版加沉浸式全屏（无状态栏、禁用精灵球），看页面能不能占满整个显示区。临时放进平台 Pages/cast-emit，量完换回 countdown_probe.xml。仓库 reference/experiments/cast_emit/ruler_probe.xml -->
+  <page-meta theme="no-status-bar|disable-chat-bar" screen-awake="keep"/>
+  <view left="0" top="0" width="640" height="290" border-width="1" border-color="#FFFFFF" bg-opa="0"/>
+  <label left="100" top="8" text="|100" font-size="16" color="#FFFFFF"/>
+  <label left="200" top="8" text="|200" font-size="16" color="#FFFFFF"/>
+  <label left="300" top="8" text="|300" font-size="16" color="#FFFFFF"/>
+  <label left="400" top="8" text="|400" font-size="16" color="#FFFFFF"/>
+  <label left="500" top="8" text="|500" font-size="16" color="#FFFFFF"/>
+  <label left="600" top="8" text="|600" font-size="16" color="#FFFFFF"/>
+  <label left="700" top="8" text="|700" font-size="16" color="#FFFFFF"/>
+  <label left="800" top="8" text="|800" font-size="16" color="#FFFFFF"/>
+  <label left="900" top="8" text="|900" font-size="16" color="#FFFFFF"/>
+  <label left="8" top="40" text="—50" font-size="16" color="#FFFFFF"/>
+  <label left="8" top="90" text="—100" font-size="16" color="#FFFFFF"/>
+  <label left="8" top="140" text="—150" font-size="16" color="#FFFFFF"/>
+  <label left="8" top="190" text="—200" font-size="16" color="#FFFFFF"/>
+  <label left="8" top="240" text="—250" font-size="16" color="#FFFFFF"/>
+  <label left="8" top="290" text="—300" font-size="16" color="#FFFFFF"/>
+  <label left="8" top="340" text="—350" font-size="16" color="#FFFFFF"/>
+  <label left="8" top="390" text="—400" font-size="16" color="#FFFFFF"/>
+  <label left="8" top="440" text="—450" font-size="16" color="#FFFFFF"/>
+  <label left="8" top="490" text="—500" font-size="16" color="#FFFFFF"/>
+</view>

@@ -1,0 +1,21 @@
+<view xmlns:a="waft://dsl" width="100%" height="100%" flex-flow="column" bg-color="#000000">
+  <!-- glasscast 流畅模式探针五（research.md 9.19）：计数放进事件参数，不写 data。emit://event/dN?n=N 每步 n 减一，event 的 match 按前缀分到 d1～d9；n 到 0 时（只有 d0 匹配）才写一次换图编号 g，所以换图之间没有任何刷新。每张图隔 m 步，m = hops 乘 3（默认 hops 25 时 75 步，真机约 1 s；调到 3/4/6 帧时 51/36/24 步）。图片框写死 640×290 像素（标尺页实测页面约 640×290，research.md 9.20）；右下角浮一个换图编号。仓库 reference/experiments/cast_emit/countdown_probe.xml -->
+  <page-meta screen-awake="keep"/>
+  <data s="0" g="0" m="75"/>
+  <lifecycle-event on-load="data://update?s={{f:formatDate('now','MMddHHmmss')}}"/>
+  <lifecycle-event a:if="{{hops != 0}}" on-load="data://update?m={{hops * 3}}" on-new-intent="data://update?m={{hops * 3}}"/>
+  <lifecycle-event on-load="emit://event/d10?n=10"/>
+  <event match="event://d1" action="emit://event/d{{e:n - 1}}?n={{e:n - 1}}"/>
+  <event match="event://d2" action="emit://event/d{{e:n - 1}}?n={{e:n - 1}}"/>
+  <event match="event://d3" action="emit://event/d{{e:n - 1}}?n={{e:n - 1}}"/>
+  <event match="event://d4" action="emit://event/d{{e:n - 1}}?n={{e:n - 1}}"/>
+  <event match="event://d5" action="emit://event/d{{e:n - 1}}?n={{e:n - 1}}"/>
+  <event match="event://d6" action="emit://event/d{{e:n - 1}}?n={{e:n - 1}}"/>
+  <event match="event://d7" action="emit://event/d{{e:n - 1}}?n={{e:n - 1}}"/>
+  <event match="event://d8" action="emit://event/d{{e:n - 1}}?n={{e:n - 1}}"/>
+  <event match="event://d9" action="emit://event/d{{e:n - 1}}?n={{e:n - 1}}"/>
+  <event match="event://d0?" action="data://update?g={{d:g + 1}}"/>
+  <event match="event://d0?" action="emit://event/d{{d:m}}?n={{d:m}}"/>
+  <image a:if="{{d:s != 0}}" src="{{url}}{{structuredContent.url}}/{{d:s}}_{{d:g}}.jpg" width="640" height="290" image-fit="stretch"/>
+  <label text="{{d:g}}" font-size="16" color="#FFFFFF" height="20" floating="true" left="596" top="268"/>
+</view>

@@ -1,0 +1,5 @@
+{
+  "url": "https://cast.example.com/s/REPLACE_KEY/screen.jpg",
+  "timer_url": "https://cast.example.com/s/REPLACE_KEY/timer.fset",
+  "frame_duration_ms": 125
+}

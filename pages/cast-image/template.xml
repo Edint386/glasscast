@@ -1,0 +1,34 @@
+<view xmlns:a="waft://dsl" width="100%" height="100%" flex-flow="column" bg-color="#000000">
+  <!--
+    glasscast 普通模式页面 cast-image：tick 每秒改一次图片地址，重新下载一张最新截图（单图轮询，research.md 1、2.2）。
+    页面名 = 本目录名，必须与 skill/SKILL.md 打开页面时用的 templateName 一致。页面由大模型调用「UI页面渲染」打开。
+
+    真机（千问 AI 眼镜 S1，2026-10）：约每秒 1 张，延迟 1～2 秒，最稳。
+    模拟器（2026-10-24，内核 waft-lite v0.2.11，接真实 glasscast）：拉取间隔中位数 1002 ms，即每秒一张；
+      内核日志没有 W 或 E 级告警。首次渲染会连发 3 个请求（tick 还没赋值时下划线后为空），glasscast 照常返回 200。
+
+    绑定字段来源：
+      url     start_cast 返回的 url，由大模型放进 dataSource；编辑器预览时来自同目录 data.json（Mock，平铺）。
+              绑定写成「平铺 url」紧跟「structuredContent 下的 url」两段拼接：不存在的路径解析为空串，不管数据是平铺的
+              还是包在 MCP 的 structuredContent 里，都只有一段有值，模拟器实测两种形状都正确（research.md 9.2 E10）。
+              不用三元表达式：模拟器实测三元结果被截断到 63 个字符（research.md 9.2 E10）。
+              页面没有弹出或没有画面时，排查见 docs/platform-setup.md 常见问题 Q3、Q4。
+      tick:t  本页 tick 标签，每秒变一次。
+      f:timestamp()  内置函数，当前毫秒时间戳。
+
+    图片地址必须以 .jpg 结尾（真机实测 2026-10-24）：带 ?ts= 查询串的地址在手机穿戴 App 里每秒下载成功，却从不显示，
+    缓存破坏放进路径后立刻显示（research.md 9.6）。glasscast 把 screen.jpg 后面的任意路径段当作同一张图。
+
+    停止投屏：stop_cast 只停电脑端截屏，图片地址随后返回「投屏已停止」占位图，页面不会自己关闭，用眼镜的返回手势离开。
+    技能停止时不调用「UI页面渲染」（真机上那会把投屏页面重新打开，research.md 9.17），也不传 stop。
+    下面那条带 stop 判断的 lifecycle-event 是早先的实验遗留，不传 stop 时不会触发，留着无害。
+
+    根 view：width、height 必须是 100%，并显式设置 flex-flow；黑色背景与服务端 fit 模式的留边一致。
+    官方的标签和属性说明见 https://device.qianwen.com/docs 的 UI 页面开发章节。
+    注释全部写在根 view 内部：平台内置页面也是这样放注释的，根节点之前不放任何内容。注释里不写尖括号、花括号和 and 号。
+  -->
+  <page-meta screen-awake="keep"/>
+  <lifecycle-event a:if="{{stop != 0}}" on-load="waft://app/exit-page?appid={{ctx:appId}}" on-new-intent="waft://app/exit-page?appid={{ctx:appId}}"/>
+  <tick var="t" duration="86400" refresh="second"/>
+  <image src="{{url}}{{structuredContent.url}}/{{f:timestamp()}}_{{tick:t}}.jpg" width="100%" height="100%" image-fit="stretch"/>
+</view>

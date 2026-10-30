@@ -1,0 +1,84 @@
+<view xmlns:a="waft://dsl" width="100%" height="100%" flex-flow="column" bg-color="#000000">
+  <!--
+    glasscast 流畅模式页面（emit 事件总线自环当节拍器，research.md 9.8）。页面名 cast-emit = 本目录名。
+    本文件由 reference/experiments/cast_emit/gen_cast_emit.py 生成，不要手改。
+
+    原理：页面给自己发事件 w、h01、h02……，emit 是异步的（下一轮消息循环才发布），每一跳几十毫秒。
+    一圈 n 跳（n 由 start_cast 出参 hops 经 dataSource 下发，1～25）：w 是第 0 跳，写一次 d:f，
+    绑定刷新、图片换地址、重新下载一张；跳到第 n 跳时回到 w。所以每秒约 1000 除以（n 乘每跳毫秒数）张。
+    hops 由 glasscast 按 fast_fps 和每跳毫秒数估算（GLASSCAST_EMIT_HOP_MS），改帧率不用改本页。
+
+    写法约束：
+      所有 URI 属性都以 scheme 开头（emit、data、event），平台保存校验 URI-001 放行（2026-10-24 探针通过）。
+      topic 用两位数：event 的 match 是前缀匹配，两位数保证互不为前缀；每页最多 32 个 match 条目。
+      内核限制根 view 下最多 64 个子元素（多一个整页解析失败），所以每跳只用两条 event，最多 25 跳。
+      收尾条件写成「常量 大于等于 d:n」（常量写在左边，属性里不能写小于号）；最后一跳无条件回到 w，
+      运行中 hops 变小（on-new-intent）时链条在下一跳收尾，不会断。
+      hops 判断用 不等于 0：模型把 hops 当字符串传进来也能写入；缺 hops 时保持默认 8。
+      data 地址里不写 and 号，各个字段分开写入；a:if 里不用 f 和 e 命名空间。
+      不按 on-hide 停换图：真机上语音播报会短暂遮挡页面，之后不一定收到 on-show，换图会永远停住。
+      d:f 是每圈加一的小计数器：真机把超过 2147483647 的数卡在这个上限（模拟器则是绕回），
+      所以不能把时间戳存进 data，否则地址永远不变、只出一帧（research.md 9.11）。
+      地址里的时间戳只在绑定刷新时现算，保证每次打开页面都是新地址，不命中缓存。
+      不放 tick：每次绑定刷新都会让图片重新加载，多一次刷新就多打断一次加载。
+  -->
+  <page-meta screen-awake="keep"/>
+  <lifecycle-event a:if="{{stop != 0}}" on-load="waft://app/exit-page?appid={{ctx:appId}}" on-new-intent="waft://app/exit-page?appid={{ctx:appId}}"/>
+  <data s="0" f="0" k="0" m="3" n="8"/>
+  <lifecycle-event on-load="data://update?s={{f:formatDate('now','MMddHHmmss')}}"/>
+  <lifecycle-event a:if="{{hops != 0}}" on-load="data://update?n={{hops}}" on-new-intent="data://update?n={{hops}}"/>
+  <lifecycle-event on-load="emit://event/w?"/>
+  <event a:if="{{d:k >= d:m}}" match="event://w?" action="data://update?f={{d:f + 1}}"/>
+  <event a:if="{{d:k >= d:m}}" match="event://w?" action="data://update?k=0"/>
+  <event match="event://w?" action="data://update?k={{d:k + 1}}"/>
+  <event a:if="{{d:n > 1}}" match="event://w?" action="emit://event/h01?"/>
+  <event a:if="{{1 >= d:n}}" match="event://w?" action="emit://event/w?"/>
+  <event a:if="{{d:n > 2}}" match="event://h01?" action="emit://event/h02?"/>
+  <event a:if="{{2 >= d:n}}" match="event://h01?" action="emit://event/w?"/>
+  <event a:if="{{d:n > 3}}" match="event://h02?" action="emit://event/h03?"/>
+  <event a:if="{{3 >= d:n}}" match="event://h02?" action="emit://event/w?"/>
+  <event a:if="{{d:n > 4}}" match="event://h03?" action="emit://event/h04?"/>
+  <event a:if="{{4 >= d:n}}" match="event://h03?" action="emit://event/w?"/>
+  <event a:if="{{d:n > 5}}" match="event://h04?" action="emit://event/h05?"/>
+  <event a:if="{{5 >= d:n}}" match="event://h04?" action="emit://event/w?"/>
+  <event a:if="{{d:n > 6}}" match="event://h05?" action="emit://event/h06?"/>
+  <event a:if="{{6 >= d:n}}" match="event://h05?" action="emit://event/w?"/>
+  <event a:if="{{d:n > 7}}" match="event://h06?" action="emit://event/h07?"/>
+  <event a:if="{{7 >= d:n}}" match="event://h06?" action="emit://event/w?"/>
+  <event a:if="{{d:n > 8}}" match="event://h07?" action="emit://event/h08?"/>
+  <event a:if="{{8 >= d:n}}" match="event://h07?" action="emit://event/w?"/>
+  <event a:if="{{d:n > 9}}" match="event://h08?" action="emit://event/h09?"/>
+  <event a:if="{{9 >= d:n}}" match="event://h08?" action="emit://event/w?"/>
+  <event a:if="{{d:n > 10}}" match="event://h09?" action="emit://event/h10?"/>
+  <event a:if="{{10 >= d:n}}" match="event://h09?" action="emit://event/w?"/>
+  <event a:if="{{d:n > 11}}" match="event://h10?" action="emit://event/h11?"/>
+  <event a:if="{{11 >= d:n}}" match="event://h10?" action="emit://event/w?"/>
+  <event a:if="{{d:n > 12}}" match="event://h11?" action="emit://event/h12?"/>
+  <event a:if="{{12 >= d:n}}" match="event://h11?" action="emit://event/w?"/>
+  <event a:if="{{d:n > 13}}" match="event://h12?" action="emit://event/h13?"/>
+  <event a:if="{{13 >= d:n}}" match="event://h12?" action="emit://event/w?"/>
+  <event a:if="{{d:n > 14}}" match="event://h13?" action="emit://event/h14?"/>
+  <event a:if="{{14 >= d:n}}" match="event://h13?" action="emit://event/w?"/>
+  <event a:if="{{d:n > 15}}" match="event://h14?" action="emit://event/h15?"/>
+  <event a:if="{{15 >= d:n}}" match="event://h14?" action="emit://event/w?"/>
+  <event a:if="{{d:n > 16}}" match="event://h15?" action="emit://event/h16?"/>
+  <event a:if="{{16 >= d:n}}" match="event://h15?" action="emit://event/w?"/>
+  <event a:if="{{d:n > 17}}" match="event://h16?" action="emit://event/h17?"/>
+  <event a:if="{{17 >= d:n}}" match="event://h16?" action="emit://event/w?"/>
+  <event a:if="{{d:n > 18}}" match="event://h17?" action="emit://event/h18?"/>
+  <event a:if="{{18 >= d:n}}" match="event://h17?" action="emit://event/w?"/>
+  <event a:if="{{d:n > 19}}" match="event://h18?" action="emit://event/h19?"/>
+  <event a:if="{{19 >= d:n}}" match="event://h18?" action="emit://event/w?"/>
+  <event a:if="{{d:n > 20}}" match="event://h19?" action="emit://event/h20?"/>
+  <event a:if="{{20 >= d:n}}" match="event://h19?" action="emit://event/w?"/>
+  <event a:if="{{d:n > 21}}" match="event://h20?" action="emit://event/h21?"/>
+  <event a:if="{{21 >= d:n}}" match="event://h20?" action="emit://event/w?"/>
+  <event a:if="{{d:n > 22}}" match="event://h21?" action="emit://event/h22?"/>
+  <event a:if="{{22 >= d:n}}" match="event://h21?" action="emit://event/w?"/>
+  <event a:if="{{d:n > 23}}" match="event://h22?" action="emit://event/h23?"/>
+  <event a:if="{{23 >= d:n}}" match="event://h22?" action="emit://event/w?"/>
+  <event a:if="{{d:n > 24}}" match="event://h23?" action="emit://event/h24?"/>
+  <event a:if="{{24 >= d:n}}" match="event://h23?" action="emit://event/w?"/>
+  <event match="event://h24?" action="emit://event/w?"/>
+  <image a:if="{{d:s != 0}}" src="{{url}}{{structuredContent.url}}/{{d:s}}_{{d:f}}.jpg" width="100%" height="100%" image-fit="stretch"/>
+</view>

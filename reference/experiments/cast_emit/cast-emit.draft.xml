@@ -1,0 +1,30 @@
+<view xmlns:a="waft://dsl" width="100%" height="100%" flex-flow="column" bg-color="#000000">
+  <page-meta screen-awake="keep"/>
+  <data f="0" hops="4"/>
+  <lifecycle-event a:if="{{hops > 0}}" on-load="data://update?hops={{hops}}"/>
+  <lifecycle-event on-load="emit://event/h0?"/>
+  <event a:if="{{d:hops > 1}}" match="event://h0?" action="emit://event/h1?"/>
+  <event a:if="{{d:hops == 1}}" match="event://h0?" action="data://update?f={{f:timestamp()}}"/>
+  <event a:if="{{d:hops == 1}}" match="event://h0?" action="emit://event/h0?"/>
+  <event a:if="{{d:hops > 2}}" match="event://h1?" action="emit://event/h2?"/>
+  <event a:if="{{d:hops == 2}}" match="event://h1?" action="data://update?f={{f:timestamp()}}"/>
+  <event a:if="{{d:hops == 2}}" match="event://h1?" action="emit://event/h0?"/>
+  <event a:if="{{d:hops > 3}}" match="event://h2?" action="emit://event/h3?"/>
+  <event a:if="{{d:hops == 3}}" match="event://h2?" action="data://update?f={{f:timestamp()}}"/>
+  <event a:if="{{d:hops == 3}}" match="event://h2?" action="emit://event/h0?"/>
+  <event a:if="{{d:hops > 4}}" match="event://h3?" action="emit://event/h4?"/>
+  <event a:if="{{d:hops == 4}}" match="event://h3?" action="data://update?f={{f:timestamp()}}"/>
+  <event a:if="{{d:hops == 4}}" match="event://h3?" action="emit://event/h0?"/>
+  <event a:if="{{d:hops > 5}}" match="event://h4?" action="emit://event/h5?"/>
+  <event a:if="{{d:hops == 5}}" match="event://h4?" action="data://update?f={{f:timestamp()}}"/>
+  <event a:if="{{d:hops == 5}}" match="event://h4?" action="emit://event/h0?"/>
+  <event a:if="{{d:hops > 6}}" match="event://h5?" action="emit://event/h6?"/>
+  <event a:if="{{d:hops == 6}}" match="event://h5?" action="data://update?f={{f:timestamp()}}"/>
+  <event a:if="{{d:hops == 6}}" match="event://h5?" action="emit://event/h0?"/>
+  <event a:if="{{d:hops > 7}}" match="event://h6?" action="emit://event/h7?"/>
+  <event a:if="{{d:hops == 7}}" match="event://h6?" action="data://update?f={{f:timestamp()}}"/>
+  <event a:if="{{d:hops == 7}}" match="event://h6?" action="emit://event/h0?"/>
+  <event a:if="{{d:hops >= 8}}" match="event://h7?" action="data://update?f={{f:timestamp()}}"/>
+  <event a:if="{{d:hops >= 8}}" match="event://h7?" action="emit://event/h0?"/>
+  <image src="{{url}}{{structuredContent.url}}/{{d:f}}.jpg" width="480" height="218" image-fit="stretch"/>
+</view>

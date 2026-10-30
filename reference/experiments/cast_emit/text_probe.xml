@@ -1,0 +1,42 @@
+<view xmlns:a="waft://dsl" width="100%" height="100%" flex-flow="column" bg-color="#000000">
+  <!-- glasscast 流畅模式文字探针（research.md 9.16）：emit 自环 32 步一圈（页面最多 32 个 match 条目，真机约 0.4 s），每圈只在最后写一次 d:f，没有计数器、没有图片。数字在眼镜上跳，说明事件循环触发的刷新能显示；数字不动，说明问题不在图片。dataSource 带 stop 时页面关闭自己。由 tools 生成前的手写实验页，仓库 reference/experiments/cast_emit/text_probe.xml -->
+  <page-meta screen-awake="keep"/>
+  <lifecycle-event a:if="{{stop != 0}}" on-load="waft://app/exit-page?appid={{ctx:appId}}" on-new-intent="waft://app/exit-page?appid={{ctx:appId}}"/>
+  <data f="0"/>
+  <lifecycle-event on-load="emit://event/h00?"/>
+  <event match="event://h00?" action="emit://event/h01?"/>
+  <event match="event://h01?" action="emit://event/h02?"/>
+  <event match="event://h02?" action="emit://event/h03?"/>
+  <event match="event://h03?" action="emit://event/h04?"/>
+  <event match="event://h04?" action="emit://event/h05?"/>
+  <event match="event://h05?" action="emit://event/h06?"/>
+  <event match="event://h06?" action="emit://event/h07?"/>
+  <event match="event://h07?" action="emit://event/h08?"/>
+  <event match="event://h08?" action="emit://event/h09?"/>
+  <event match="event://h09?" action="emit://event/h10?"/>
+  <event match="event://h10?" action="emit://event/h11?"/>
+  <event match="event://h11?" action="emit://event/h12?"/>
+  <event match="event://h12?" action="emit://event/h13?"/>
+  <event match="event://h13?" action="emit://event/h14?"/>
+  <event match="event://h14?" action="emit://event/h15?"/>
+  <event match="event://h15?" action="emit://event/h16?"/>
+  <event match="event://h16?" action="emit://event/h17?"/>
+  <event match="event://h17?" action="emit://event/h18?"/>
+  <event match="event://h18?" action="emit://event/h19?"/>
+  <event match="event://h19?" action="emit://event/h20?"/>
+  <event match="event://h20?" action="emit://event/h21?"/>
+  <event match="event://h21?" action="emit://event/h22?"/>
+  <event match="event://h22?" action="emit://event/h23?"/>
+  <event match="event://h23?" action="emit://event/h24?"/>
+  <event match="event://h24?" action="emit://event/h25?"/>
+  <event match="event://h25?" action="emit://event/h26?"/>
+  <event match="event://h26?" action="emit://event/h27?"/>
+  <event match="event://h27?" action="emit://event/h28?"/>
+  <event match="event://h28?" action="emit://event/h29?"/>
+  <event match="event://h29?" action="emit://event/h30?"/>
+  <event match="event://h30?" action="emit://event/h31?"/>
+  <event match="event://h31?" action="data://update?f={{d:f + 1}}"/>
+  <event match="event://h31?" action="emit://event/h00?"/>
+  <label text="流畅测试：每圈加一" font-size="24" color="#FFFFFF" height="32"/>
+  <label text="{{d:f}}" font-size="58" font-weight="bold" color="#FFFFFF" height="72"/>
+</view>

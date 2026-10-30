@@ -1,0 +1,78 @@
+# glasscast（docs/deploy.md 方案 B）：挂在一个已有 https 站点的路径 __PATH_PREFIX__/ 下。
+#
+# 由 deploy/server-setup.sh 从 deploy/nginx/glasscast-path-prefix.locations.template 渲染为 glasscast-locations.inc。
+# 这是 location 片段，不是完整配置：不要放进 conf.d（conf.d/*.conf 在 http 级，location 放在那里 nginx -t 会失败）。
+# 用法：
+#   1. conf.d 里放好 glasscast-upstream.conf（upstream glasscast_tunnel，http 级，每台服务器一份）；
+#   2. 把本文件放到 conf.d 以外，例如 /etc/nginx/snippets/glasscast-locations.inc，然后在已有站点的
+#      server { listen 443 ssl ...; } 里、location / 之前加一行：
+#          include /etc/nginx/snippets/glasscast-locations.inc;
+#   3. nginx -t && systemctl reload nginx
+#   4. 电脑上：glasscast serve --public-url https://<已有站点的域名>__PATH_PREFIX__
+#
+# proxy_pass 带 URI 时，nginx 会把匹配到的前缀换掉：__PATH_PREFIX__/s/<key>/... → /s/<key>/...，
+# __PATH_PREFIX__/mcp → /mcp，glasscast 不需要知道前缀。都用 ^~ / =，是为了不让站点里已有的正则 location
+# （例如给 .jpg 加缓存头的规则）抢走图片请求。这里不写 add_header，免得覆盖站点 server 级的安全头。
+# 只转发 healthz / s / mcp 三类路径；glasscast 的本机管理接口 /admin 显式 404，不要为它加转发。
+
+# ---- glasscast（方案 B）开始 ----
+location = __PATH_PREFIX__/healthz {
+    proxy_pass http://glasscast_tunnel/healthz;
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_next_upstream error timeout;
+    proxy_next_upstream_tries 2;
+    proxy_connect_timeout 2s;
+    proxy_send_timeout 3s;
+    proxy_read_timeout 3s;
+}
+
+location ^~ __PATH_PREFIX__/admin/ {
+    return 404;
+}
+
+location ^~ __PATH_PREFIX__/s/ {
+    # 图片地址里的 key 相当于看屏口令，不写进已有站点的访问日志
+    access_log off;
+    limit_except GET {
+        deny all;
+    }
+    proxy_pass http://glasscast_tunnel/s/;
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Forwarded-Prefix __PATH_PREFIX__;
+    proxy_buffering off;
+    gzip off;
+    proxy_next_upstream error timeout;
+    proxy_next_upstream_tries 2;
+    proxy_next_upstream_timeout 4s;
+    proxy_connect_timeout 2s;
+    proxy_send_timeout 10s;
+    proxy_read_timeout 10s;
+}
+
+location ^~ __PATH_PREFIX__/mcp {
+    proxy_pass http://glasscast_tunnel/mcp;
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Forwarded-Prefix __PATH_PREFIX__;
+    proxy_set_header Authorization $http_authorization;
+    proxy_buffering off;
+    proxy_next_upstream error timeout non_idempotent;
+    proxy_next_upstream_tries 2;
+    proxy_next_upstream_timeout 4s;
+    proxy_connect_timeout 2s;
+    proxy_send_timeout 10s;
+    proxy_read_timeout 30s;
+}
+# ---- glasscast（方案 B）结束 ----

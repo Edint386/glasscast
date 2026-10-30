@@ -1,0 +1,37 @@
+[
+  {
+    "name": "XXXXXX.start_cast",
+    "config": {
+      "hooks": [
+        {
+          "id": "hook-fast",
+          "stage": "OUTPUT",
+          "condition": "(success == true && mode == 'fast') || (structuredContent.success == true && structuredContent.mode == 'fast')",
+          "actions": [
+            {
+              "type": "RENDER",
+              "templateName": "cast-fast",
+              "renderMode": "open"
+            }
+          ],
+          "enable": true,
+          "intercepted": false
+        },
+        {
+          "id": "hook-image",
+          "stage": "OUTPUT",
+          "condition": "(success == true && mode == 'image') || (structuredContent.success == true && structuredContent.mode == 'image')",
+          "actions": [
+            {
+              "type": "RENDER",
+              "templateName": "cast-image",
+              "renderMode": "open"
+            }
+          ],
+          "enable": true,
+          "intercepted": false
+        }
+      ]
+    }
+  }
+]

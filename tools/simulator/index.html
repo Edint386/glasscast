@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>glasscast 模拟器</title>
+  <!--
+    本页必须由 tools/simulator/serve.py 提供：它给所有响应加 COOP/COEP 头，页面才是
+    cross-origin isolated，waft-lite 的 WASM pthreads 才能启动（research.md §3）。
+    也因为 COEP require-corp，本页不加载任何外部字体/脚本，样式全部内联。
+  -->
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --text: #1d2129;
+      --muted: #6b7280;
+      --border: #d9dce3;
+      --accent: #2563eb;
+      --accent-text: #ffffff;
+      --ok: #15803d;
+      --warn: #b45309;
+      --err: #b91c1c;
+      --code-bg: #f1f3f6;
+      --log-bg: #0f1115;
+      --log-text: #d6dae1;
+      --log-warn: #f5b84a;
+      --log-err: #ff7b72;
+      --log-hl: #7ee0a1;
+      --log-harness: #8ab4f8;
+      color-scheme: light;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --bg: #111317;
+        --panel: #1a1d23;
+        --text: #e6e8ec;
+        --muted: #9aa3b2;
+        --border: #2e333c;
+        --accent: #5b8cff;
+        --accent-text: #0b0d10;
+        --ok: #4ade80;
+        --warn: #fbbf24;
+        --err: #f87171;
+        --code-bg: #22262e;
+        color-scheme: dark;
+      }
+    }
+    :root[data-theme="dark"] {
+      --bg: #111317;
+      --panel: #1a1d23;
+      --text: #e6e8ec;
+      --muted: #9aa3b2;
+      --border: #2e333c;
+      --accent: #5b8cff;
+      --accent-text: #0b0d10;
+      --ok: #4ade80;
+      --warn: #fbbf24;
+      --err: #f87171;
+      --code-bg: #22262e;
+      color-scheme: dark;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font: 14px/1.5 -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", "Microsoft YaHei", sans-serif;
+      padding: 12px 16px 24px;
+    }
+    .mono, textarea, code, .log { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 12px; }
+    header h1 { font-size: 18px; margin: 0; }
+    .pill { display: inline-block; padding: 2px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--panel); font-size: 12px; }
+    .pill.ok { color: var(--ok); border-color: currentColor; }
+    .pill.warn { color: var(--warn); border-color: currentColor; }
+    .pill.err { color: var(--err); border-color: currentColor; }
+    .muted { color: var(--muted); }
+    .small { font-size: 12px; }
+    .banner { display: none; padding: 10px 12px; border: 1px solid var(--err); color: var(--err); border-radius: 8px; margin-bottom: 12px; background: var(--panel); white-space: pre-wrap; }
+    .banner.show { display: block; }
+    .layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+    @media (max-width: 1100px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+    .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px; min-width: 0; }
+    .panel h2 { font-size: 14px; margin: 0 0 8px; }
+    .panel h3 { font-size: 13px; margin: 12px 0 6px; }
+    .log-panel { grid-column: 1 / -1; }
+    .row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-bottom: 8px; }
+    .stack { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+    label { font-size: 13px; }
+    input[type="text"], select, textarea {
+      background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px; font-size: 13px; max-width: 100%;
+    }
+    textarea { width: 100%; resize: vertical; tab-size: 2; white-space: pre; }
+    #xml { min-height: 220px; }
+    #data { min-height: 90px; }
+    button {
+      background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 5px 12px; font-size: 13px; cursor: pointer;
+    }
+    button:hover:not(:disabled) { border-color: var(--accent); }
+    button:disabled { opacity: .5; cursor: default; }
+    button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+    code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; font-size: 12px; overflow-wrap: anywhere; }
+    .screen-wrap { overflow-x: auto; padding-bottom: 4px; }
+    .screen-crop { position: relative; overflow: hidden; background: #000; border-radius: 6px; outline: 1px solid var(--border); }
+    .screen-scale { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+    .screen-scale canvas { display: block; image-rendering: pixelated; }
+    .screen-crop.inspecting { cursor: crosshair; }
+    #inspectBox { position: absolute; border: 2px solid #ff4d4f; pointer-events: none; box-shadow: 0 0 0 1px rgba(0,0,0,.6); }
+    .keys { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+    .stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; margin-top: 8px; }
+    .stat { border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; }
+    .stat .k { font-size: 11px; color: var(--muted); }
+    .stat .v { font-size: 15px; font-variant-numeric: tabular-nums; }
+    table { border-collapse: collapse; width: 100%; font-size: 12px; }
+    th, td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+    td.wrap { white-space: normal; overflow-wrap: anywhere; }
+    .table-wrap { max-height: 220px; overflow: auto; }
+    .log { background: var(--log-bg); color: var(--log-text); border-radius: 8px; padding: 8px; height: 360px; overflow: auto; font-size: 12px; line-height: 1.45; }
+    .log div { white-space: pre-wrap; overflow-wrap: anywhere; }
+    .log .warn { color: var(--log-warn); }
+    .log .error { color: var(--log-err); }
+    .log .hl { color: var(--log-hl); }
+    .log .harness { color: var(--log-harness); }
+    .log .t { color: #6b7280; margin-right: 6px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>glasscast 模拟器</h1>
+    <span id="status" class="pill">未启动</span>
+    <span id="build" class="muted small"></span>
+    <span class="muted small">waft-lite 内核 · 千问 AI 眼镜 S1 · 640×290</span>
+  </header>
+
+  <div id="banner" class="banner" role="alert"></div>
+
+  <main class="layout">
+    <section class="panel" aria-label="页面与数据">
+      <h2>页面</h2>
+      <div class="row">
+        <label>预设
+          <select id="preset"></select>
+        </label>
+        <button id="loadPreset" type="button">载入预设</button>
+      </div>
+      <div class="row">
+        <label>app <input id="app" type="text" value="glasscast" size="12"></label>
+        <label>page <input id="page" type="text" value="cast-image" size="14"></label>
+      </div>
+      <div class="row small"><span class="muted">uri</span> <code id="uri"></code></div>
+      <label class="stack">template.xml
+        <textarea id="xml" spellcheck="false" rows="14"></textarea>
+      </label>
+      <label class="stack">data.json（页面的 dataSource，真机上由模型打开页面时传入）
+        <textarea id="data" spellcheck="false" rows="5"></textarea>
+      </label>
+      <div class="row">
+        <button id="render" class="primary" type="button" disabled>渲染</button>
+        <button id="update" type="button" disabled>只更新数据</button>
+        <button id="close" type="button" disabled>关闭页面</button>
+        <button id="reboot" type="button">重启内核</button>
+      </div>
+      <div class="row small">
+        <label><input id="useProxy" type="checkbox"> 远程资源走 <code>/proxy?url=</code></label>
+        <label><input id="addLatLng" type="checkbox" checked> 附加 latitude/longitude</label>
+      </div>
+      <p class="muted small" id="proxyHint"></p>
+    </section>
+
+    <section class="panel" aria-label="设备屏幕">
+      <h2>屏幕</h2>
+      <div class="row small">
+        <label>缩放
+          <select id="scale">
+            <option value="1">1×</option>
+            <option value="1.5">1.5×</option>
+            <option value="2">2×</option>
+            <option value="0.75">0.75×</option>
+          </select>
+        </label>
+        <label><input id="fullCanvas" type="checkbox"> 显示整块画布</label>
+        <label><input id="inspect" type="checkbox"> 点选检查元素</label>
+      </div>
+      <div class="screen-wrap">
+        <div id="screenCrop" class="screen-crop">
+          <div id="screenScale" class="screen-scale">
+            <canvas id="waft-canvas" width="640" height="480"></canvas>
+            <div id="inspectBox" hidden></div>
+          </div>
+        </div>
+      </div>
+      <div class="keys" aria-label="S1 触控键">
+        <button type="button" data-key="confirm" disabled>单击 confirm</button>
+        <button type="button" data-key="back" disabled>双击 back</button>
+        <button type="button" data-key="prev" disabled>前滑 prev</button>
+        <button type="button" data-key="next" disabled>后滑 next</button>
+        <button type="button" data-key="left" disabled>left</button>
+        <button type="button" data-key="right" disabled>right</button>
+        <button type="button" data-key="home" disabled>home</button>
+      </div>
+      <div id="inspectInfo" class="mono small muted"></div>
+      <div id="stats" class="stats"></div>
+      <h3>服务端看到的拉取（/demo、/proxy）</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>时间</th><th>距上次</th><th>路径</th><th>状态</th><th>字节</th></tr></thead>
+          <tbody id="requests"></tbody>
+        </table>
+      </div>
+      <p class="muted small">glasscast 服务（:8766）的请求不经过这里，看它自己的日志或响应头 <code>X-Glasscast-Seq</code>。</p>
+    </section>
+
+    <section class="panel log-panel" aria-label="日志">
+      <h2>日志</h2>
+      <div class="row small">
+        <input id="logFilter" type="text" placeholder="过滤（正则，不区分大小写）" size="28">
+        <label><input id="logImportant" type="checkbox"> 只看关键行</label>
+        <label><input id="logFollow" type="checkbox" checked> 自动滚动</label>
+        <button id="clearLog" type="button">清空</button>
+        <button id="copyLog" type="button">复制全部</button>
+      </div>
+      <div id="log" class="log" aria-live="off"></div>
+    </section>
+  </main>
+
+  <script type="module" src="/harness.js"></script>
+</body>
+</html>

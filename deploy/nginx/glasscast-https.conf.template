@@ -1,0 +1,133 @@
+# glasscast：__DOMAIN__ 的 443 端口 vhost（docs/deploy.md 方案 A）。
+#
+# 由 deploy/server-setup.sh 从 deploy/nginx/glasscast-https.conf.template 渲染，证书签好之后放进 conf.d；
+# 依赖同目录的 glasscast-upstream.conf（upstream glasscast_tunnel）。手工使用见 docs/deploy.md「手工部署」。
+#
+# 链路：眼镜（经手机下载图片）/ 千问平台（云端调用 MCP）--HTTPS--> 本 vhost
+#       --> glasscast_tunnel（服务器回环地址上 sshd 的反向转发端口）--SSH 隧道--> 电脑上的 glasscast serve
+#
+# 对外只开放三类路径，其余一律 404：
+#   /healthz        健康检查（隧道断开时 502）
+#   /s/<key>/...    眼镜拉图，只允许 GET/HEAD；眼镜发不了请求头，鉴权靠路径里的随机 key，由 glasscast 校验
+#   /mcp            MCP（streamable HTTP），Bearer Token 由 glasscast 校验
+#   /admin/         显式 404：glasscast 的管理接口（glasscast set-fps / glasscast config 用）只给电脑本机用，
+#                   绝不经公网转发
+#
+# 平台约束：
+#   - 只开 ssl + http2，不开 HTTP/3，也不下发 Alt-Svc（平台的 HTTP 客户端看到 Alt-Svc 会尝试 HTTP/3，容易失败）。
+#   - MCP 工具约 3 s 超时：/mcp 也走 keepalive 上游，池里失效的旧连接立刻换新连接重发。
+# 只用到 core / ssl / http2 / proxy / upstream / headers / gzip / log 模块的标准指令。
+
+server {
+    # 写成 "listen ... ssl http2" 是为了兼容 nginx 1.18～1.24（Ubuntu 22.04 / 24.04 自带的版本）；
+    # nginx 1.25.1+ 会提示这种写法已弃用，只是警告，不影响 nginx -t。不要加任何 quic / http3 参数。
+    listen 443 ssl http2;
+    server_name __DOMAIN__;
+    server_tokens off;
+
+    ssl_certificate __SSL_CERT__;
+    ssl_certificate_key __SSL_KEY__;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    # 会话缓存用 glasscast 自己的名字：同名的共享缓存如果在别的 vhost 里大小不同，nginx -t 会报冲突。
+    ssl_session_cache shared:glasscast_ssl:1m;
+    ssl_session_timeout 10m;
+    ssl_session_tickets off;
+
+    # 不记访问日志：图片地址里的 key 相当于看屏口令，不落盘。
+    # 注意 error_log 在隧道断开（502/504）时会记下请求行，里面也有 key；这份日志要当密码对待。
+    access_log off;
+    error_log __ERROR_LOG__ warn;
+    client_max_body_size 64k;
+
+    proxy_hide_header Strict-Transport-Security;
+    proxy_hide_header X-Content-Type-Options;
+    proxy_hide_header Referrer-Policy;
+    proxy_hide_header Alt-Svc;
+    # server 级写了 add_header，http 级（nginx.conf）的 add_header 就不会再继承进来，
+    # 所以即使全局配置里有 Alt-Svc，这个 vhost 也不会下发。location 里不要再写 add_header，
+    # 否则会反过来覆盖掉这三条。
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "no-referrer" always;
+
+    # 健康检查：curl / 排障用。隧道断开时返回 502。
+    location = /healthz {
+        proxy_pass http://glasscast_tunnel;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_next_upstream error timeout;
+        proxy_next_upstream_tries 2;
+        proxy_connect_timeout 2s;
+        proxy_send_timeout 3s;
+        proxy_read_timeout 3s;
+    }
+
+    # glasscast 的本机管理接口（POST /admin/fps、GET /admin/config）只给电脑本机用。
+    # 下面的 location / 本来就兜底 404，这里显式写出来，免得以后有人加了更宽泛的转发规则时把它一起带出去。
+    location ^~ /admin/ {
+        return 404;
+    }
+
+    # 眼镜拉图：/s/<key>/screen.jpg/<会话>_<序号>.jpg（地址必须以 .jpg 结尾），以及 /s/<key>/status.json 等。
+    location ^~ /s/ {
+        # 只读路径：放行 GET（自动包含 HEAD），其余方法 403。
+        limit_except GET {
+            deny all;
+        }
+
+        proxy_pass http://glasscast_tunnel;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+
+        # 边收边发，配合 glasscast 的 Cache-Control: no-store。
+        proxy_buffering off;
+        # JPEG 本身已压缩；保持原始 Content-Length 给手机端的下载器。
+        gzip off;
+
+        # 池里的旧连接（隧道重连后）失败时换另一个 peer 重发一次。
+        proxy_next_upstream error timeout;
+        proxy_next_upstream_tries 2;
+        proxy_next_upstream_timeout 4s;
+
+        proxy_connect_timeout 2s;
+        proxy_send_timeout 10s;
+        proxy_read_timeout 10s;
+    }
+
+    # MCP（streamable HTTP，无状态 + JSON 响应），平台云端调用，Bearer 由 glasscast 校验。
+    # Host 必须原样透传：glasscast 的 DNS 重绑定保护只放行 --public-url 里的域名，否则平台收到 421。
+    location ^~ /mcp {
+        proxy_pass http://glasscast_tunnel;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Authorization $http_authorization;
+
+        # 万一平台改用 SSE / 流式响应，事件要立刻转发，不能被缓冲。
+        proxy_buffering off;
+
+        # 旧连接失败时换新连接重发，POST 也重发（non_idempotent）：
+        # start_cast / stop_cast / cast_status 重复执行都安全。
+        proxy_next_upstream error timeout non_idempotent;
+        proxy_next_upstream_tries 2;
+        proxy_next_upstream_timeout 4s;
+
+        # 工具本身很快返回（平台约 3 s 超时）；30 s 只是给偶发的慢网留余量。
+        proxy_connect_timeout 2s;
+        proxy_send_timeout 10s;
+        proxy_read_timeout 30s;
+    }
+
+    location / {
+        return 404;
+    }
+}

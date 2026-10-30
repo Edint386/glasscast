@@ -1,0 +1,13 @@
+# glasscast：每周检查一次证书是否需要续期（仅 1Panel 变体）
+# 安装位置：/etc/systemd/system/glasscast-cert-renew.timer（由 deploy/server-setup.sh 安装并 enable --now）
+# 查看下次触发时间：systemctl list-timers glasscast-cert-renew.timer
+[Unit]
+Description=Weekly certificate renewal check for glasscast (1Panel OpenResty)
+
+[Timer]
+OnCalendar=Sun *-*-* 03:17:00
+RandomizedDelaySec=6h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

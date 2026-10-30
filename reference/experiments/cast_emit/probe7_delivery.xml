@@ -1,0 +1,13 @@
+<view xmlns:a="waft://dsl" width="100%" height="100%" bg-color="#000000">
+  <!-- glasscast 真机探针七（下载与播放，research.md 9.25）：8 个 200×91 格子按文档顺序请求 …/probe/<时间>_<名字>，名字 = 格式 + 千字节：f = 20 帧 .fset（16/40/80/160 KB），fj = .fset 字节放在 .jpg 地址后，g = 20 帧 GIF，i = 单张 JPEG。每帧烧进名字和帧号，片段循环播放。看三件事：哪些格子出现、哪些在动（帧号在跳）；日志里请求是一个接一个（串行）还是同时到；相邻请求的间隔随体积怎么变。临时放进平台 Pages/cast-emit，测完换回 countdown_probe.xml。仓库 reference/experiments/cast_emit/probe7_delivery.xml -->
+  <page-meta screen-awake="keep"/>
+  <frame-set src="{{url}}{{structuredContent.url}}/probe/{{f:formatDate('now','MMddHHmmss')}}_f16.fset" total-frames="20" frame-duration="100" repeat-count="0" width="200" height="91" floating="true" left="0" top="0"/>
+  <frame-set src="{{url}}{{structuredContent.url}}/probe/{{f:formatDate('now','MMddHHmmss')}}_f40.fset" total-frames="20" frame-duration="100" repeat-count="0" width="200" height="91" floating="true" left="210" top="0"/>
+  <frame-set src="{{url}}{{structuredContent.url}}/probe/{{f:formatDate('now','MMddHHmmss')}}_f80.fset" total-frames="20" frame-duration="100" repeat-count="0" width="200" height="91" floating="true" left="420" top="0"/>
+  <frame-set src="{{url}}{{structuredContent.url}}/probe/{{f:formatDate('now','MMddHHmmss')}}_f160.fset" total-frames="20" frame-duration="100" repeat-count="0" width="200" height="91" floating="true" left="0" top="99"/>
+  <frame-set src="{{url}}{{structuredContent.url}}/probe/{{f:formatDate('now','MMddHHmmss')}}_fj20.jpg" total-frames="20" frame-duration="100" repeat-count="0" width="200" height="91" floating="true" left="210" top="99"/>
+  <gif src="{{url}}{{structuredContent.url}}/probe/{{f:formatDate('now','MMddHHmmss')}}_g8.gif" repeat-count="0" width="200" height="91" floating="true" left="420" top="99"/>
+  <image src="{{url}}{{structuredContent.url}}/probe/{{f:formatDate('now','MMddHHmmss')}}_i4.jpg" width="200" height="91" floating="true" left="0" top="198"/>
+  <image src="{{url}}{{structuredContent.url}}/probe/{{f:formatDate('now','MMddHHmmss')}}_i12.jpg" width="200" height="91" floating="true" left="210" top="198"/>
+  <label text="probe7" font-size="20" color="#FFFFFF" height="28" floating="true" left="440" top="230"/>
+</view>

@@ -1,0 +1,7 @@
+<view xmlns:a="waft://dsl" width="100%" height="100%" flex-flow="column" bg-color="#000000">
+  <!-- glasscast 流畅模式探针六（GIF 自定节奏，research.md 9.24）：<gif repeat-count="1"> 播完一遍触发 on-completed，g 加一，src 换成下一张 …/<时间>_<g>.gif。要验证三件事：真机能不能显示远程 GIF；单帧 GIF 播完会不会触发 on-completed；src 变了会不会重新下载（模拟器里不会，research.md 9.8）。右下角是 g：停在 0 = 没触发；停在 1 = 触发了但不重新下载；一直涨 = 成功。临时放进平台 Pages/cast-emit，测完换回 countdown_probe.xml。仓库 reference/experiments/cast_emit/gif_probe.xml -->
+  <page-meta screen-awake="keep"/>
+  <data g="0"/>
+  <gif src="{{url}}{{structuredContent.url}}/{{f:formatDate('now','MMddHHmmss')}}_{{d:g}}.gif" width="640" height="290" image-fit="stretch" repeat-count="1" on-completed="data://update?g={{d:g + 1}}"/>
+  <label text="{{d:g}}" font-size="16" color="#FFFFFF" height="20" floating="true" left="596" top="268"/>
+</view>

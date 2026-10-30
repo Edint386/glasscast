@@ -1,0 +1,22 @@
+# glasscast：nginx / OpenResty 到反向 SSH 隧道端口的 upstream（http 级配置，放进 conf.d）。
+#
+# 由 deploy/server-setup.sh 从 deploy/nginx/glasscast-upstream.conf.template 渲染，安装为
+# conf.d/glasscast-upstream.conf。手工使用见 docs/deploy.md「手工部署」。
+# 方案 A（独立域名 vhost）、方案 B（已有站点的路径前缀）和 1Panel 面板建站共用这一份，每台服务器只放一份；
+# 名字 glasscast_tunnel 在 conf.d 的所有文件里必须唯一。
+#
+# 为什么这样写（平台调用 MCP 工具的总超时约 3 s，见 docs/deploy.md「延迟与连接复用」）：
+# - keepalive：复用到隧道端口的 TCP 连接。每条新连接都要在 SSH 隧道里新开一个 channel（一次往返），
+#   服务器离电脑远时，冷连接一次请求要 0.5～1 s，热连接只要一个往返。
+# - keepalive_timeout 3600s：glasscast serve 的 uvicorn keep-alive 是 7200 s，比这里长，所以总是 nginx 先关，
+#   不会拿到对端刚关掉的连接；deploy/tunnel.sh 每 30 s 经公网拉一次 /healthz 给连接池保温。
+# - 同一地址写两次：隧道重连后池里的旧连接全部失效，而 nginx 对只有一个 server 的 upstream 不重试；
+#   两个 peer 配合 location 里的 proxy_next_upstream，旧连接失败时立刻换一条新连接重发。
+# - max_fails=0：隧道短暂断开时不把 peer 标成不可用（默认会在之后 10 s 内一律 502）。
+# 需要 nginx 1.15.3+（upstream 里的 keepalive_timeout）。
+upstream glasscast_tunnel {
+    server __TUNNEL_ADDR__:__TUNNEL_PORT__ max_fails=0;
+    server __TUNNEL_ADDR__:__TUNNEL_PORT__ max_fails=0;
+    keepalive 16;
+    keepalive_timeout 3600s;
+}

@@ -1,0 +1,114 @@
+<view xmlns:a="waft://dsl" width="100%" height="100%" flex-flow="column" bg-color="#000000">
+  <!--
+    glasscast 旧的流畅模式页面 cast-fast（页面名 = 本目录名）：把帧合集当定时器，定时换图片地址（research.md 9.2 E4、9.3）。
+    只能在本地模拟器里跑：平台保存校验 URI-001 拒绝绑定的 frame-set action，这个页面上不了平台，也没有在真机上跑过。
+    平台和真机用的流畅模式页面是 pages/cast-emit，skill/SKILL.md 只打开 cast-image 和 cast-emit。
+
+    工作原理：
+      1. frame-set 播放 timer_url 指向的帧合集（glasscast 的 /s/KEY/timer.fset，2 帧 8 × 8 灰度 PNG，内容固定），
+         每帧 frame_duration_ms 毫秒，repeat-count 为 1，播完一遍触发 on-completed。
+      2. on-completed 执行 data://update：d:i 加 1，act 重新写成 start。data://update 会同步刷新页面全部绑定，于是
+         frame-set 的 action 绑定被重新应用为 start，帧合集从头再播，循环成立；
+         image 的 src 里 d:i 和 f:timestamp() 都变了，地址变化，重新下载一张截图。
+      3. 一轮 = 2 帧 × frame_duration_ms（另加少量调度开销），每轮拉一张图。
+         fast_fps 为 4 时 frame_duration_ms = round(1000 / 4 / 2) = 125，约每 250 ms 一张。
+      帧合集在这里只是定时器、不是播放器：frame-set 的 src 只在节点创建时求值一次，换不了段
+      （research.md 9.2 E2、E3）。旧的分段流页面在 reference/experiments/cast_clip/。
+
+    必须与服务端一致：
+      total-frames="2"、width="8" height="8" 必须等于 glasscast timer.fset 的帧数和帧尺寸（build_timer_fset 的默认值）：
+      .fset 文件头里只有帧数和偏移，没有帧尺寸，全靠这里的 XML 声明（research.md 4）。
+      frame-duration 不写死，绑定工具出参 frame_duration_ms，改帧率不用改本页。
+
+    模拟器实测（2026-10-24，内核 waft-lite v0.2.11，接真实 glasscast，合成画面、灰度 JPEG 640 × 290）：
+      frame_duration_ms 为 125 时图片拉取间隔中位数 266 ms，约 3.8 张每秒；为 200 时中位数 418 ms，说明页面确实采用了
+      出参下发的帧时长（research.md 9.2 E9）。每轮固定多出 16～18 ms 调度开销。内核日志没有 W 或 E 级告警，
+      画面铺满 640 × 290，关闭页面后请求立即停止。这些数字只代表模拟器，不代表手机下载加蓝牙的真机链路。
+
+    绑定字段来源：
+      url、timer_url、frame_duration_ms 来自 start_cast（mode=fast）的返回，预览时来自同目录 data.json（Mock，平铺）。
+      三个绑定都写成「平铺字段」紧跟「structuredContent 下的同名字段」两段拼接：不存在的路径解析为空串，
+      不管数据是平铺的还是包在 MCP 的 structuredContent 里，都只有一段有值（research.md 9.2 E10）。
+      不用三元表达式：模拟器实测结果被截断到 63 个字符，长一点的地址就坏了（research.md 9.2 E10）。
+      d:i、d:act 是本页 data 标签声明的局部状态，只能被 data://update 修改。
+      f:timestamp() 是内置函数，当前毫秒时间戳，每次渲染或绑定刷新时重新取值。
+
+    官方的标签和属性说明见 https://device.qianwen.com/docs 的 UI 页面开发章节。
+    注释全部写在根 view 内部，根节点之前不放任何内容；注释里不写花括号绑定、尖括号和 and 号，免得轻量解析器误判。
+  -->
+
+  <!--
+    注意：本文件有一处历史遗留，根 view 里又套了一层 view，data、frame-set、image 在内外两层各写了一遍。
+    页面只给本地模拟器用，这里保持原样；下面的说明只写在内层那一遍。
+  -->
+<view xmlns:a="waft://dsl" width="100%" height="100%" flex-flow="column" bg-color="#000000">
+  <!-- 说明见文件开头。 -->
+
+  <!--
+    page-meta：页面级设置，每页最多一个。
+      screen-awake="keep"  持续常亮直到页面退出或用户手动灭屏（合法值只有 short / keep，默认 short）。
+      没设 auto-exit-ms 就不自动退出；没设 theme 就用默认的 status-bar-island。
+  -->
+  <page-meta screen-awake="keep"/>
+
+  <!--
+    data：属性名即局部变量名，读取写作 d:i、d:act；值自动推断类型。
+      i="0"        int 0，每轮加 1，让图片地址变化，也方便在服务端日志里对照。
+      act="start"  string start，供 frame-set 的 action 绑定。
+  -->
+  <data i="0" act="start"/>
+
+  <!--
+    frame-set（定时器，research.md 9.2 E4、E9）：
+      src               两段拼接，见文件开头。只在创建时求值一次（research.md 9.2 E2）；内容固定，内核按完整 URL 缓存
+                        （research.md 9.2 E7），所以不加防缓存参数，实测每打开一次页面最多下载 1 次。
+      width、height     帧尺寸，等于 timer.fset 的帧尺寸。
+      floating="true"   脱离 flex 排布。不加时 frame-set 在 column 布局里占一行，模拟器实测 image 被挤到 y=24、底部 24 像素
+                        被裁掉；加上后 image 回到 (0, 0) 640 × 290。frame-set 写在 image 前面，被后画的 image 完全盖住，
+                        定时器照常运行。
+      total-frames="2"  必填，等于 timer.fset 的帧数。
+      frame-duration    两段拼接，拼出来就是一个整数字面量。整数毫秒，默认 41，最大 1000，超过被截断。
+                        官方属性表没有标注它可绑定，模拟器实测绑定生效（research.md 9.2 E9）。
+      repeat-count="1"  必须是 1：0 = 无限循环且不注册 on-completed，大于等于 1 才会触发完成回调。
+      color-format="0"  RGB565。定时器帧不显示有用内容，用解码内存最小的格式。
+      action            必须写成绑定：每次 data://update 刷新绑定时重新应用 start，帧合集才会重播；
+                        写成静态 start 只播一遍（research.md 9.2 E4）。
+      on-completed      播完 repeat-count 遍后触发。两个参数之间写 and 号的 XML 实体，模板因此是良构 XML。
+                        模拟器（v0.2.11）实测 DSL 不解码实体，日志里第二个参数带着残留的 amp; 前缀，d:act 没被写入；
+                        但 d:i 照常加 1、全部绑定照常刷新，action 仍是 start，循环成立（research.md 9.2 E4）。
+    页面销毁时 frame-set 会取消所有挂起的任务，退出页面即停止轮询。
+  -->
+  <frame-set src="{{timer_url}}{{structuredContent.timer_url}}" width="8" height="8" floating="true" total-frames="2"
+             frame-duration="{{frame_duration_ms}}{{structuredContent.frame_duration_ms}}"
+             repeat-count="1" color-format="0" action="{{d:act}}"
+             on-completed="data://update?i={{d:i + 1}}&amp;act=start"/>
+
+  <!--
+    image（投屏画面）：
+      src   url 字段（两段拼接，见文件开头）+ 斜杠 + f:timestamp() + 下划线 + d:i + .jpg，缓存破坏放在路径里。
+            地址必须以 .jpg 结尾：带 ?ts= 查询串的地址在手机穿戴 App 里下载成功却从不显示（research.md 9.6）。
+            glasscast 把 screen.jpg 后面的任意路径段当作同一张图。
+            远程图异步下载并按完整 URL 缓存，地址必须每轮都不同才会重新下载（research.md 2.2、9.2 E7）。
+            时间戳：只靠 d:i 不够，同一内核里重开页面时 d:i 从 0 重数，会全部命中上次的缓存（research.md 9.2 E7）。
+            d:i：保证同一毫秒内也不重复，并方便在服务端日志里对照。
+            单张图下载慢于定时器周期时请求会堆积（research.md 9.3），所以图要小，推荐设置见 .env.example。
+            编辑器预览经平台代理拉取，实测对外部域名可能失败（页面日志 download failed），不代表页面有问题（research.md 9.1）。
+      width="100%" height="100%"  铺满页面画布。
+      image-fit="stretch"  唯一合法值，需要显式宽高。
+  -->
+  <image src="{{url}}{{structuredContent.url}}/{{f:timestamp()}}_{{d:i}}.jpg" width="100%" height="100%" image-fit="stretch"/>
+</view>
+
+
+  <!-- 同上。 -->
+  <data i="0" act="start"/>
+
+  <!-- 同上。 -->
+  <frame-set src="{{timer_url}}{{structuredContent.timer_url}}" width="8" height="8" floating="true" total-frames="2"
+             frame-duration="{{frame_duration_ms}}{{structuredContent.frame_duration_ms}}"
+             repeat-count="1" color-format="0" action="{{d:act}}"
+             on-completed="data://update?i={{d:i + 1}}&amp;act=start"/>
+
+  <!-- 同上。 -->
+  <image src="{{url}}{{structuredContent.url}}/{{f:timestamp()}}_{{d:i}}.jpg" width="100%" height="100%" image-fit="stretch"/>
+</view>

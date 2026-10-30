@@ -1,0 +1,13 @@
+<view xmlns:a="waft://dsl" width="100%" height="100%" flex-flow="column" bg-color="#000000">
+  <!-- 实验：emit:// 事件总线自环当节拍器（research.md §9.8）。每 4 跳写一次 d:f，图片地址随之变化。
+       模拟器实测约 10 次/秒；真机速率与平台保存校验均未验证。不要直接替换平台上的 cast-fast。 -->
+  <page-meta screen-awake="keep"/>
+  <data f="0"/>
+  <lifecycle-event on-load="emit://event/h0?"/>
+  <event match="event://h0?" action="emit://event/h1?"/>
+  <event match="event://h1?" action="emit://event/h2?"/>
+  <event match="event://h2?" action="emit://event/h3?"/>
+  <event match="event://h3?" action="data://update?f={{f:timestamp()}}"/>
+  <event match="event://h3?" action="emit://event/h0?"/>
+  <image src="{{url}}{{structuredContent.url}}/{{d:f}}.jpg" width="100%" height="100%" image-fit="stretch"/>
+</view>

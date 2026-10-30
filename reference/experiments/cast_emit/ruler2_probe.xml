@@ -1,0 +1,28 @@
+<view xmlns:a="waft://dsl" width="1000" height="600" bg-color="#000000">
+  <!-- glasscast 屏幕标尺二（research.md 9.20）：第一版量出页面约 640×290，但用户说它在眼镜视野里偏左偏上、没铺满。这版用 theme 去掉状态栏和精灵球，根 view 写死 1000×600，刻度画到 x=1000、y=600，看页面能不能超出 640×290。细框 = 640×290；+ 在 (320,145)。临时放进平台 Pages/cast-emit，量完换回 countdown_probe.xml。仓库 reference/experiments/cast_emit/ruler2_probe.xml -->
+  <page-meta screen-awake="keep" theme="no-status-bar|disable-chat-bar"/>
+  <view left="0" top="0" width="640" height="290" border-width="2" border-color="#FFFFFF" bg-opa="0"/>
+  <label left="314" top="133" text="+" font-size="20" color="#FFFFFF"/>
+  <label left="100" top="8" text="|100" font-size="16" color="#FFFFFF"/>
+  <label left="200" top="8" text="|200" font-size="16" color="#FFFFFF"/>
+  <label left="300" top="8" text="|300" font-size="16" color="#FFFFFF"/>
+  <label left="400" top="8" text="|400" font-size="16" color="#FFFFFF"/>
+  <label left="500" top="8" text="|500" font-size="16" color="#FFFFFF"/>
+  <label left="600" top="8" text="|600" font-size="16" color="#FFFFFF"/>
+  <label left="700" top="8" text="|700" font-size="16" color="#FFFFFF"/>
+  <label left="800" top="8" text="|800" font-size="16" color="#FFFFFF"/>
+  <label left="900" top="8" text="|900" font-size="16" color="#FFFFFF"/>
+  <label left="1000" top="8" text="|1000" font-size="16" color="#FFFFFF"/>
+  <label left="8" top="40" text="—50" font-size="16" color="#FFFFFF"/>
+  <label left="8" top="90" text="—100" font-size="16" color="#FFFFFF"/>
+  <label left="8" top="140" text="—150" font-size="16" color="#FFFFFF"/>
+  <label left="8" top="190" text="—200" font-size="16" color="#FFFFFF"/>
+  <label left="8" top="240" text="—250" font-size="16" color="#FFFFFF"/>
+  <label left="8" top="290" text="—300" font-size="16" color="#FFFFFF"/>
+  <label left="8" top="340" text="—350" font-size="16" color="#FFFFFF"/>
+  <label left="8" top="390" text="—400" font-size="16" color="#FFFFFF"/>
+  <label left="8" top="440" text="—450" font-size="16" color="#FFFFFF"/>
+  <label left="8" top="490" text="—500" font-size="16" color="#FFFFFF"/>
+  <label left="8" top="540" text="—550" font-size="16" color="#FFFFFF"/>
+  <label left="8" top="590" text="—600" font-size="16" color="#FFFFFF"/>
+</view>

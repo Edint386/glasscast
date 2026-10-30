@@ -1,0 +1,80 @@
+<view xmlns:a="waft://dsl" width="100%" height="100%" flex-flow="column" bg-color="#000000">
+  <!--
+    【必须与服务端一致】
+      total-frames="10"   必须等于 glasscast 的 clip_frames（默认 10，命令行 clip-frames 参数）；
+      frame-duration="200" 必须等于 frame_duration_ms = round(1000 / clip_fps)，默认 clip_fps 5 =》200，上限 1000；
+      width="640" height="290" 必须等于服务端画布 canvas（默认 640 × 290）。
+    原因：.fset 文件头里只有帧数和偏移，没有帧尺寸和帧时长，全靠这里的 XML 声明（research 4）。
+    改了服务端的 clip-frames / clip-fps / 画布，就要同步改这三处，并核对 start_cast 出参里的
+    clip_frames、frame_duration_ms、width、height。服务端在第一段攒满前也会返回补齐到 clip_frames 帧的
+    占位段，保证 total-frames 恒成立（实现指南 4.2）。
+
+    glasscast 电脑投屏 · clip 模式页面（方案一：帧合集分段流，见 docs/research.md 1、2.4、4）
+    【已废弃，不要上传到平台】本地模拟器实测 frame-set 的 src 只在节点创建时求值一次，d:i、tick、
+    dataSource://update、a:if 都不能让它重新下载，用 ctx:uri 重开页面也无效（research 9.2 E2、E3），
+    本页只能播第一段（约 2 秒）就停住。第二轮已从 pages/ 移到 reference/experiments/cast_clip/，
+    skill/ui_schema.json 与 SKILL.md 都不再引用本页；替代方案是 pages/cast-fast（帧合集当定时器，
+    research 9.2 E4）。原因与复现方法见同目录 README.md。本文件只留作模拟器对照实验。
+    出处记号：「文档 N.x」= 官方文档 https://device.qianwen.com/docs 第 N 节的第 x 小节（按 2026-10 目录顺序编号）
+    （31 引用UI页面 / 34 页面开发指南 / 35 能力矩阵 / 36 完整参考）；「research x」= docs/research.md 第 x 节。
+
+    根 view 属性：
+      xmlns:a="waft://dsl"  文档 34.1、36.6：经标准 XML 工具处理时建议在根节点声明。
+      width="100%" height="100%"  文档 34.1、34.9 自检第 1 条：根节点必须 100% × 100%（文档 36.5.2）。
+      flex-flow="column"    文档 34.1、34.9：根节点显式设置 flex-flow；合法值见文档 35.3、36.5.4。
+      bg-color="#000000"    文档 36.4.3、36.5.1：#RRGGBB。
+
+    绑定字段来源（文档 34.9 自检：所有绑定字段都有明确数据来源）：
+      clip_url  假设 Hook RENDER 以 start_cast 的工具出参作为页面 dataSource，clip_url 即出参里的同名字段
+                （文档未说明）【待验证】。文档 31.3.4.6 只规定了 condition 求值时的根对象。
+                编辑器预览时来自同目录 data.json（Mock）。
+      d:i       本页 data 标签声明的局部状态（文档 34.4、36.6.3、36.7.3）。
+  -->
+
+  <!--
+    page-meta：文档 36.3.5。必须是根 view 的直接子元素，每页最多一个。
+      screen-awake="keep"  合法值只有 short / keep（默认 short）；keep = 持续常亮直到页面退出。
+      未设 auto-exit-ms    = 不自动退出。
+  -->
+  <page-meta screen-awake="keep"/>
+
+  <!--
+    data：文档 36.6.3、34.4。属性名即局部变量名，读取写作 d:i；值自动推断类型，"0" =》 int 0。
+    d: 命名空间与 dataSource 隔离，只能被 data://update 修改（文档 34.4、36.10.3）。
+  -->
+  <data i="0"/>
+
+  <!--
+    frame-set：文档 36.3.3 属性表（另见文档 35.1、33.6.5、33.8.6）；研究结论 research 2.4、4。
+      src             必填，支持 http(s)://。= clip_url 字段 + 「?i=」+ 段序号 d:i（服务端忽略 i）。
+                      设计意图是每段播完 i 加 1、地址变化后重新下载最新一段，但模拟器实测不成立：
+                      src 只在创建时求值一次，d:i 变成 1 后不会重新下载，画面停在最后一帧
+                      （tools/simulator/README.md 4-2）。官方属性表里 src 的类型也只写"路径字符串"，
+                      明确可绑定的只有 current-frame 和 action（文档 36.3.3）。另外内核按 URL 缓存下载结果、
+                      跨页面有效，上次会话的 clip.fset?i=0 会直接命中缓存（README 4-3）。
+      width="640" height="290"  帧尺寸，等于服务端画布（见顶部说明），也正好是 DSL 画布（文档 34.3.1）。
+      total-frames="10"  必填，整数，默认 1。必须等于服务端 clip_frames。
+      frame-duration="200"  整数毫秒，默认 41，最大 1000（超过被截断）。必须等于服务端 frame_duration_ms。
+      repeat-count="1"   整数，默认 0；0 = 无限循环且不注册 on-completed，N 大于等于 1 才会触发完成回调
+                         （文档 36.3.3 约束、33.6.5 调试要点）。
+      color-format="0"   合法值 0 = RGB565、1 = ARGB8888，默认 0。屏幕画面不需要透明通道，RGB565 解码后
+                         每帧 640 × 290 × 2 = 371200 B，只有 ARGB8888 的一半（research 2.4）。
+      load-async="true"  布尔，默认 false：异步加载帧资源，下载期间不阻塞页面。
+      未设 auto-play     默认 true，加载完自动播放。
+      未设 cached        默认 false，不把整段帧常驻内存。
+      未设 is-manual-frame  默认 false；设成 true 会让 on-completed 不注册。
+      未设 placeholder   第三方无法提供占位图来源（文档 34.7、36.3.4 约束）。
+      on-completed       URI 模板，播完 repeat-count 遍后触发，在回调时刻按页面当前上下文解析（文档 36.3.3）。
+                         data://update 同步修改 d:i 并刷新绑定（文档 36.10.3）；值里的 d:i + 1 是文档允许的
+                         算术插值（变量在左、数字字面量在右，文档 36.7.2、36.10.3 示例）。data:// 的值不做
+                         URI 编码，这里只有整数，安全。模拟器实测回调会触发、d:i 也会变，但 src 不随之
+                         重新下载，链式切段不成立（research 2.4、8.2）。
+    远程帧文件经 batched downloader 异步下载（文档 36.3.3 约束）；帧内容是 PNG（research 4）。
+    JPEG 帧在模拟器里黑屏、也不触发 on-completed（README 4-4），只能用 PNG 帧。
+  -->
+  <frame-set src="{{clip_url}}?i={{d:i}}"
+             width="640" height="290"
+             total-frames="10" frame-duration="200"
+             repeat-count="1" color-format="0" load-async="true"
+             on-completed="data://update?i={{d:i + 1}}"/>
+</view>
