@@ -14,7 +14,7 @@
   它同时决定 MCP 的 DNS 重绑定保护放行哪个 ``Host``（实现指南 §4.3），填错平台会收到 421。
 - ``token`` 是 MCP 的 Bearer Token；眼镜发不了请求头，所以图片地址只能靠路径里的随机 ``cast_key`` 鉴权
   （实现指南 §1）。两者为空时启动时自动生成（token 只打印一次）。
-- 对外只有 ``image``（普通，1 fps）和 ``fast``（流畅，``fast_fps``，默认 4）两种模式（实现指南 §9.1）。
+- 对外只有 ``image``（普通，1 fps）和 ``fast``（流畅，``fast_fps`` 是档位，默认 4）两种模式（实现指南 §9.1）。
   fast 页面 ``cast-emit`` 的跳数 ``hops = round(1000 / fast_fps / emit_hop_ms)`` 由 ``start_cast`` 下发
   （research.md §9.8），所以改 ``fast_fps`` 不用改页面（``frame_duration_ms`` 只给 ``cast-fast`` 参考页面用）。
   clip 分段流已下线（research.md §2.4、§9.3），
@@ -224,10 +224,10 @@ class Settings:
     canvas: tuple[int, int] = CANVAS
     #: image 模式（普通，页面 ``<tick>`` 每秒刷新）的截帧频率
     image_fps: float = 1.0
-    #: fast 模式（流畅，cast-emit 事件倒数换图）截帧频率的**初始值**，真机实际低于它（设 4 约每秒 1.5 张）。
+    #: fast 模式（流畅，cast-emit 事件倒数换图）档位的**初始值**：电脑每秒截这么多张，真机帧数低于它（4 档约每秒 1.5 帧）。
     #: 合法范围 1～10；运行中的当前值在 pipeline 上（start_cast(fps=…) / glasscast set-fps 会改它）
     fast_fps: float = DEFAULT_FAST_FPS
-    #: cast-emit 页面每一跳的估计耗时（毫秒），决定 start_cast 出参 hops（research.md §9.8）
+    #: cast-emit 页面 hops 的换算系数（毫秒），不是真机每跳耗时，决定 start_cast 出参 hops（research.md §9.8）
     emit_hop_ms: float = DEFAULT_EMIT_HOP_MS
     jpeg_quality: int = 70
     #: JPEG 编码器：auto（装了 mozjpeg 就用，research.md §9.21）/ mozjpeg / pillow
@@ -342,9 +342,9 @@ class Settings:
             )
         if self.fast_fps <= self.image_fps:
             notes.append(
-                f"fast_fps={self.fast_fps:g} 不高于 image_fps={self.image_fps:g}：fast（流畅）模式不会比普通模式更流畅"
+                f"fast_fps={self.fast_fps:g}（档位）不高于 image_fps={self.image_fps:g}：流畅模式的电脑截帧频率不比普通模式高"
             )
-        # 大于 8 的提醒与运行中 set-fps 共用文案（research.md §9.3）
+        # 大于 4 档的提醒与运行中 set-fps 共用文案（research.md §9.20）
         notes.extend(fast_fps_warnings(self.fast_fps))
         if self.color_mode != "gray":
             notes.append(

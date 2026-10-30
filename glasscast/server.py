@@ -14,8 +14,8 @@
 ``GET /s/{key}/clip/{n}.fset``      同上，``n`` 只用于防缓存，服务端忽略
 ``GET /s/{key}/status.json``        ``pipeline.stats()`` + 当前地址 + 页面参数（顶层 ``fast_fps`` 是运行时当前值）
 ``/mcp``                            MCP streamable HTTP（stateless + JSON 响应），Bearer 鉴权
-``POST /admin/fps``                 电脑本机改流畅模式帧率（``{"fps": 6}``），不用重启；Bearer 鉴权（同 /mcp）
-``GET /admin/config``               当前模式、流畅/普通帧率、帧时长、色彩、画布；Bearer 鉴权（同 /mcp）
+``POST /admin/fps``                 电脑本机改流畅模式档位（``{"fps": 6}``），不用重启；Bearer 鉴权（同 /mcp）
+``GET /admin/config``               当前模式、流畅档位和估算的真机帧数、普通模式截帧频率、帧时长、色彩、画布；Bearer 鉴权（同 /mcp）
 ==================================  ==========================================================
 
 平台约束：
@@ -35,7 +35,7 @@
   否则平台收到 421（实现指南 §4.3）；放行列表见 :meth:`~glasscast.config.Settings.mcp_allowed_hosts`。
 - ``/admin/*`` 是给电脑本机 ``glasscast set-fps`` / ``glasscast config`` 用的管理接口：与 ``/mcp`` 同一个
   Bearer Token、同一套校验（:class:`McpGuardMiddleware`），公网 vhost 显式 404（deploy/nginx，docs/deploy.md）。
-  改帧率只改电脑端（截帧节拍立即变）；眼镜上已打开页面的 ``hops`` 在打开时写入（research.md §9.8），
+  改档位只改电脑端（截帧节拍立即变）；眼镜上已打开页面的 ``hops`` 在打开时写入（research.md §9.8），
   下一次 ``start_cast`` 重新打开页面后才按新节拍换图，所以返回的 message 会说明这一点。
 """
 
@@ -77,6 +77,7 @@ from .pipeline import (
     Clip,
     FastFpsError,
     Snapshot,
+    device_fps_for,
     emit_hops_for,
     fast_fps_warnings,
 )
@@ -564,19 +565,21 @@ def create_app(
         # 页面的跳数 hops 只经 start_cast 出参下发（research.md §9.8）：已打开的 cast-emit 不会跟着变
         if mode == "fast":
             return (
-                f"眼镜上已打开的流畅模式页面仍按旧跳数拉图；对眼镜说「投屏调到 {fps:g} 帧」，"
+                f"眼镜上已打开的流畅模式页面仍按旧跳数拉图；对眼镜说「投屏调到 {fps:g} 档」，"
                 "页面会拿到新的 hops 并按新节拍刷新"
             )
-        return "下次切到流畅模式时按这个帧率投屏"
+        return "下次切到流畅模式时按这个档位投屏"
 
     async def admin_config(request: Request) -> Response:
         fast_fps, fast_duration = pipeline.fast_settings()
+        hops = emit_hops_for(fast_fps, settings.emit_hop_ms)
         width, height = pipeline.canvas
         return JSONResponse(
             {
                 "success": True,
                 "mode": pipeline.mode,
                 "fast_fps": fast_fps,
+                "device_fps": device_fps_for(hops),
                 # 流畅模式页面定时器每帧毫秒数 round(1000/fast_fps/2)，与 start_cast(mode=fast) 出参同名字段一致
                 "frame_duration_ms": fast_duration,
                 "image_fps": pipeline.image_fps,
@@ -585,7 +588,7 @@ def create_app(
                 "fast_fps_range": [FAST_FPS_MIN, FAST_FPS_MAX],
                 "initial_fast_fps": settings.fast_fps,
                 # cast-emit 页面跳数（与 start_cast 出参一致）和估算用的每跳毫秒数（research.md §9.8）
-                "hops": emit_hops_for(fast_fps, settings.emit_hop_ms),
+                "hops": hops,
                 "emit_hop_ms": settings.emit_hop_ms,
             }
         )
@@ -611,19 +614,24 @@ def create_app(
         except FastFpsError as exc:
             return admin_error(400, "invalid_fps", str(exc))
         mode = pipeline.mode
+        hops = emit_hops_for(fps, settings.emit_hop_ms)
+        previous_hops = emit_hops_for(previous_fps, settings.emit_hop_ms)
+        device_fps = device_fps_for(hops)
         return JSONResponse(
             {
                 "success": True,
                 "mode": mode,
                 "fast_fps": fps,
+                "device_fps": device_fps,
                 "frame_duration_ms": duration,
                 "previous_fast_fps": previous_fps,
+                "previous_device_fps": device_fps_for(previous_hops),
                 "previous_frame_duration_ms": previous_duration,
-                "hops": emit_hops_for(fps, settings.emit_hop_ms),
-                "previous_hops": emit_hops_for(previous_fps, settings.emit_hop_ms),
+                "hops": hops,
+                "previous_hops": previous_hops,
                 "warnings": fast_fps_warnings(fps),
                 "message": (
-                    f"流畅模式帧率已改为每秒 {fps:g} 张（hops={emit_hops_for(fps, settings.emit_hop_ms)}），电脑端截帧立即生效；"
+                    f"流畅模式已调到 {fps:g} 档（真机约每秒 {device_fps:g} 帧，hops={hops}），电脑端截帧立即生效；"
                     + fast_page_note(mode, fps)
                 ),
             }

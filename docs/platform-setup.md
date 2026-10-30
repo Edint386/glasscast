@@ -14,8 +14,8 @@
 
 | 模式 | 对眼镜说 | 眼镜页面 | 真机速度（2026-10 实测） |
 |---|---|---|---|
-| 普通模式（默认） | 「开始投屏」 | `cast-image` | 约每秒 1 张，延迟 1～2 秒，最稳 |
-| 流畅模式 | 「用流畅模式投屏」 | `cast-emit` | 帧率设置为 4 时约每秒 1.5 张；设置再高可能卡住（见 [Q5](#q5流畅模式画面卡住不动或者没有说的每秒-n-张那么快)） |
+| 普通模式（默认） | 「开始投屏」 | `cast-image` | 约每秒 1 帧，延迟 1～2 秒，最稳 |
+| 流畅模式 | 「用流畅模式投屏」 | `cast-emit` | 4 档时约每秒 1.5 帧；档位再高可能卡住（见 [Q5](#q5流畅模式画面卡住不动或者真实帧数比档位低)） |
 
 要粘贴到平台上的文件：
 
@@ -67,7 +67,7 @@ python3 -c 'import secrets; print(secrets.token_urlsafe(32))'
 . ./.env && uv run glasscast serve
 ```
 
-- `.env.example` 里的画面参数就是真机验证过的推荐值（`GLASSCAST_CANVAS=480x218`、灰度、`crop`、每张约 2.6 KB、流畅模式帧率 4），保持不动即可。代码默认的 640×290、质量 70 的图在真机上下载成功却不显示。
+- `.env.example` 里的画面参数就是真机验证过的推荐值（`GLASSCAST_CANVAS=480x218`、灰度、`crop`、每张约 2.6 KB、流畅模式 4 档），保持不动即可。代码默认的 640×290、质量 70 的图在真机上下载成功却不显示。
 - **Token 必须固定**。不设 `GLASSCAST_TOKEN` 时每次启动都随机生成一个，平台里填的旧 token 立刻失效（表现为 401、工具数为 0）。Token 只放在 `.env` 和平台插件配置里，**不要**写进 SKILL.md、页面或 data.json。
 - 启动输出里有图片地址 `https://cast.example.com/s/<KEY>/screen.jpg` 和 MCP 地址 `https://cast.example.com/mcp`。记下 KEY，第 2 步要用。KEY 每次启动都会变，这没关系：页面用的地址由 `start_cast` 在运行时返回。
 - **macOS 屏幕录制权限**：系统设置 → 隐私与安全性 → 屏幕录制，给**启动 glasscast 的那个 App**（终端 / iTerm / VS Code……）打开开关，然后重启 glasscast。没有权限时只能截到黑屏或桌面壁纸。只想先联调平台，可以用合成画面：`. ./.env && uv run glasscast serve --source synthetic`。
@@ -153,9 +153,9 @@ glasscast 的 MCP 是**无状态**的（不需要先 `initialize`），所以上
 | 工具 | 入参 | 期望返回 |
 |---|---|---|
 | `start_cast` | `{"mode": "image"}` | `success: true`、`mode: "image"`、`url` 为 `https://cast.example.com/s/<KEY>/screen.jpg`、`width: 480`、`height: 218`、`message` |
-| `start_cast` | `{"mode": "fast"}` | `success: true`、`mode: "fast"`、`url`（同上）、`hops: 12`、`fps: 4` |
-| `start_cast` | `{"mode": "fast", "fps": 20}` | `success: false`、`message: "帧率只能调到每秒 1 到 10 张，可以带小数，现在是每秒 4 张"`；投屏状态和帧率都不变 |
-| `cast_status` | `{}` | `success: true`、`active: true`、`mode`、`last_frame_age_s`、`fast_fps` |
+| `start_cast` | `{"mode": "fast"}` | `success: true`、`mode: "fast"`、`url`（同上）、`hops: 12`、`fps: 4`、`device_fps: 1.5` |
+| `start_cast` | `{"mode": "fast", "fps": 20}` | `success: false`、`message: "档位只能调到 1 到 10，可以带小数，现在是 4 档"`；投屏状态和档位都不变 |
+| `cast_status` | `{}` | `success: true`、`active: true`、`mode`、`last_frame_age_s`、`fast_fps`、`device_fps` |
 | `stop_cast` | `{}` | `success: true`、`message: "投屏已停止"` |
 
 - 每个工具调试成功一次，状态会变成「调试通过」。
@@ -182,7 +182,7 @@ glasscast 的 MCP 是**无状态**的（不需要先 `initialize`），所以上
 2. 在 `Pages` 下新建文件夹 `cast-image`，**马上**在里面新建文件 `template.xml`（空文件夹刷新后会消失）。
 3. 打开 `template.xml`，粘贴本仓库 `pages/cast-image/template.xml` 的全部内容 →「保存」。平台随后生成只读的 `meta.json`，其中 `templateName` 应为 `cast-image`。
 4. 打开同目录的 `data.json`（没有就新建），粘贴 `pages/cast-image/data.json` 的内容 →「保存」。这是编辑器预览用的 Mock 数据，可以把里面的域名和 `REPLACE_KEY` 换成你的值；真正投屏时，页面数据来自 `start_cast` 的返回，与它无关。
-5. 对 `cast-emit` 重复 1～4，内容来自 `pages/cast-emit/`。Mock 里的 `hops: 12` 对应帧率设置 4。
+5. 对 `cast-emit` 重复 1～4，内容来自 `pages/cast-emit/`。Mock 里的 `hops: 12` 对应 4 档。
 
 - 模板顶部的 `<!-- … -->` 注释可以一起粘贴，它不影响运行。
 - 保存报错见 [Q8](#q8保存-templatexml-时报错)。不要建 `cast-fast`；编辑器 AI 生成的页面也不要用。
@@ -219,12 +219,12 @@ sed 's/XXXXXX/AbC123/g' skill/SKILL.md | pbcopy
 - 「UI页面渲染」没有变成卡片：删掉那段 `^^…^^` 文本，用「工具」→ 官方镜端插件 → UI页面渲染重新插一张，后面的 `(templateName=…)` 保持不动。
 - SKILL.md 里不要写 token、域名或 KEY，页面地址由 `start_cast` 在运行时返回。
 
-SKILL.md 的要点（开始、打开页面、超时重试、停止的流程已在真机上验证；帧率预设是发布前改的，还没上真机跑过）：
+SKILL.md 的要点（开始、打开页面、超时重试、停止的流程已在真机上验证；档位预设和播报话术是发布前改的，还没上真机跑过）：
 
 - `start_cast` 成功后，模型必须立刻调用「UI页面渲染」：普通模式 `templateName="cast-image"`、`dataSource={"url": …}`；流畅模式 `templateName="cast-emit"`、`dataSource={"url": …, "hops": …}`，值原样照抄工具返回。
 - 工具超时或平台提示「工具调用失败 / 工具执行失败 / MCP 工具执行超时」时，先不说话，用同样的参数重试一次；两次都失败才播报。
 - 停止投屏只调 `stop_cast`，**不调**「UI页面渲染」（在真机上调用它会把投屏页面重新打开）。
-- 说到帧率的（「投屏调到 N 帧」「快一点」「慢一点」「最流畅」「最省流量」）一律 `start_cast(mode=fast, fps=N)`，成功后带新的 `hops` 再打开一次 `cast-emit`。「最流畅」「最快」设成 4，「快一点」在当前值上加 1、最多到 4，「慢一点」减 1、最低到 1，「最省流量」设成 1；用户说出的具体数字照传。
+- 调速度的（「投屏调到 N 档」「投屏调到 N 帧」「快一点」「慢一点」「最流畅」「最省流量」）一律 `start_cast(mode=fast, fps=N)`，N 是档位，成功后带新的 `hops` 再打开一次 `cast-emit`，播报「已调到 N 档，每秒约 X 帧」（X 是返回的 `device_fps`；N 大于 4 时播报「已调到 N 档，档位偏高，画面可能卡住」）。「最流畅」「最快」设成 4，「快一点」在当前值上加 1、最多到 4，「慢一点」减 1、最低到 1，「最省流量」设成 1；用户说出的具体数字照传。
 
 ## 8. ui_schema.json 保持为空
 
@@ -278,10 +278,10 @@ uv run python tools/simulator/serve.py
 |---|---|
 | `开始投屏` | `start_cast(mode=image)` → `UI页面渲染(templateName="cast-image", dataSource={"url": …})` → 回复「投屏已开始」 |
 | `用流畅模式投屏` | `start_cast(mode=fast)` → `UI页面渲染(templateName="cast-emit", dataSource={"url": …, "hops": 12})` → 「已用流畅模式投屏」 |
-| `投屏调到 3 帧` | `start_cast(mode=fast, fps=3)` → 返回 `hops: 17` → 再打开 `cast-emit` → 「已调到每秒 3 张」 |
-| `慢一点`（当前帧率 3） | 先 `cast_status` 拿到 `fast_fps: 3` → `start_cast(mode=fast, fps=2)` → 「已调到每秒 2 张」 |
-| `最流畅` | `start_cast(mode=fast, fps=4)` → 再打开 `cast-emit` → 「已调到每秒 4 张」 |
-| `投屏调到 20 帧` | `start_cast(mode=fast, fps=20)` → `success: false` → 原样播报「帧率只能调到每秒 1 到 10 张……」 |
+| `投屏调到 3 档` | `start_cast(mode=fast, fps=3)` → 返回 `hops: 17`、`device_fps: 1.5` → 再打开 `cast-emit` → 「已调到 3 档，每秒约 1.5 帧」 |
+| `慢一点`（当前 3 档） | 先 `cast_status` 拿到 `fast_fps: 3` → `start_cast(mode=fast, fps=2)` → 「已调到 2 档，每秒约 1 帧」 |
+| `最流畅` | `start_cast(mode=fast, fps=4)` → 再打开 `cast-emit` → 「已调到 4 档，每秒约 1.5 帧」 |
+| `投屏调到 20 档` | `start_cast(mode=fast, fps=20)` → `success: false` → 原样播报「档位只能调到 1 到 10，可以带小数，现在是 4 档」 |
 | `换成普通模式` | `start_cast(mode=image)` → 打开 `cast-image` → 「已换成普通模式」 |
 | `投屏状态` | `cast_status` → 一句话，例如「正在投屏，普通模式，画面刚刚更新」 |
 | `停止投屏` | 只调 `stop_cast`，**不调**「UI页面渲染」→ 「投屏已停止」 |
@@ -289,7 +289,7 @@ uv run python tools/simulator/serve.py
 
 - 回复里不应出现任何 URL、KEY、token、`hops`。
 - 遇到「MCP 工具执行超时」，模型应先不说话、自动重试一次（Q2）。
-- 帧率改动会一直保留到 glasscast 重启。测完说一句「投屏调到 4 帧」改回推荐值。
+- 档位改动会一直保留到 glasscast 重启。测完说一句「投屏调到 4 档」改回推荐值。
 - 沙箱里主要看工具调用对不对；眼镜页面的实际效果以真机为准。
 
 ## 11. 真机测试
@@ -298,7 +298,7 @@ uv run python tools/simulator/serve.py
 2. 技能编辑页 → 右上角「真机测试」→ 选你的眼镜 → 完成绑定。此后这副眼镜的语音指令会走技能的**编辑态**版本。
 3. 电脑上 glasscast 和公网通道保持运行，戴上眼镜依次说：
    - 「开始投屏」→ 眼镜上出现电脑画面（单色绿），约每秒刷新一次，延迟 1～2 秒。画面位于视野左上角，是系统摆放 640×290 页面的位置，页面里改不了。
-   - 「用流畅模式投屏」→ 换成 `cast-emit`，约每秒 1.5 张，右下角的换图编号持续增加（不动了就是卡住，见 Q5）。
+   - 「用流畅模式投屏」→ 换成 `cast-emit`，约每秒 1.5 帧，右下角的换图编号持续增加。画面不再变化就是卡住，这时编号可能还在增加，见 Q5。
    - 「投屏状态」→ 播报模式和画面是否刚刚更新。
    - 「停止投屏」→ 播报「投屏已停止」，画面换成「投屏已停止」占位图。页面不会自己关闭，用眼镜的返回手势退出即可。
 4. 同时看 glasscast 终端的访问日志：眼镜的请求来自 `千问AI穿戴` App（User-Agent 里能看到），地址形如 `GET /s/…/screen.jpg/<…>.jpg 200`。没有这类请求、或有请求但眼镜上没画面，见 Q3、Q4。
@@ -374,12 +374,12 @@ uv run python tools/simulator/serve.py
 2. **有请求、200，但眼镜上不显示**：图片太大。用 `.env.example` 的推荐设置（480×218 灰度，每张约 2.6 KB）；代码默认的 640×290、质量 70 在真机上不显示。如果你改过页面模板：图片地址必须以 `.jpg` 结尾（`…/screen.jpg/<会话号>_<编号>.jpg`），带 `?ts=` 这类查询参数的地址能下载成功但永远不显示。
 3. **显示出来的是黑屏或只有桌面壁纸**：macOS 屏幕录制权限没给启动 glasscast 的 App，或给了之后没重启 glasscast。用 `--source synthetic` 对照；电脑锁屏时也会截到黑屏。
 
-### Q5：流畅模式画面卡住不动，或者没有说的「每秒 N 张」那么快
+### Q5：流畅模式画面卡住不动，或者真实帧数比档位低
 
-- 原理：`cast-emit` 每换一张图要倒数 `hops × 3` 步（真机每步约 13 毫秒），`hops = round(1000 / 帧率设置 / 20)`，由 `start_cast` 返回。而手机下载、蓝牙传输加眼镜解码，每张图有约 0.65 秒的固定开销，所以**实际速度低于帧率设置**：设置 4 约每秒 1.5 张，这是实测的稳定上限。设置 ≤ 2 时 `hops` 都封顶 25，页面节奏相同，都约每秒 1 张，见 [使用手册 §12](usage.md#12-已知问题与-todo)。
-- 设置到 4.5 以上时，换图可能快到一张都显示不完，画面冻住，而且会一直停在这个状态。SKILL.md 里「最流畅」「最快」「快一点」最多只调到 4，不会进入这个区间；只有明确说出更大的数字（例如「投屏调到 6 帧」）才会。处理：说「投屏调到 4 帧」或更低；仍然不动就用返回手势离开页面，重新说「用流畅模式投屏」；或者换回普通模式。
-- 播报的「已调到每秒 N 张」说的是帧率设置，不是真机实际张数。这是已知的不准确，换算校准还没做（TODO：fps 换算校准）。
-- 电脑上也能改帧率：`. ./.env && uv run glasscast set-fps 3`。已经打开的页面不会跟着变，再对眼镜说一次「用流畅模式投屏」，页面会带新的 `hops` 重新打开。
+- 原理：`cast-emit` 每换一张图要倒数 `hops × 3` 步（真机每步约 13 毫秒），`hops = round(1000 / 档位 / 20)`，由 `start_cast` 返回。而手机下载、蓝牙传输加眼镜解码，每张图有约 0.65 秒的固定开销，所以**真实帧数低于档位**：4 档约每秒 1.5 帧，这是实测的稳定上限。1～2 档时 `hops` 都封顶 25，页面节奏相同，都约每秒 1 帧，见 [使用手册 §12](usage.md#12-已知问题与-todo)。
+- 4.5 档以上时，换图可能快到一张都显示不完，画面冻住：一张图没显示出来，眼镜就不再被图片处理拖慢，倒数全速运行（每张图 405～450 毫秒），下一张来得更快，也显示不出来。日志里这个状态持续过几十秒。4 档也可能这样。这时右下角的编号还在增加，它只说明页面还在换图，不说明画面在更新。SKILL.md 里「最流畅」「最快」「快一点」最多只调到 4，只有明确说出更大的数字（例如「投屏调到 6 档」）才会超过它。处理：说「投屏调到 4 档」或更低；仍然不动就用返回手势离开页面，重新说「用流畅模式投屏」；或者换回普通模式。
+- 播报的「已调到 N 档，每秒约 X 帧」里，N 是档位，X 是工具返回的 `device_fps`，按 `hops` 估算的真机帧数。它只是正常显示时的估算，判断不了画面是否卡住。
+- 电脑上也能改档位：`. ./.env && uv run glasscast set-fps 3`。已经打开的页面不会跟着变，再对眼镜说一次「用流畅模式投屏」，页面会带新的 `hops` 重新打开。
 
 ### Q6：停止投屏后页面还在
 
@@ -408,7 +408,7 @@ uv run python tools/simulator/serve.py
 
 - 图片地址里的 KEY 是随机串，眼镜发不了请求头，图片只靠它保护：拿到完整地址的人就能看到你的屏幕。不要外传地址或带地址的日志截图；怀疑泄露就重启 glasscast（没固定 `GLASSCAST_CAST_KEY` 时会换新 KEY）。
 - MCP 的 token 只填在平台插件里，不要出现在 SKILL.md、页面、data.json 或提交到 git 的任何文件里。
-- 流量（推荐设置，每张约 2.6 KB）：普通模式约 9 MB/小时，流畅模式（约每秒 1.5 张）约 14 MB/小时。停止投屏后页面开着时仍在下载占位图，退出页面才会停。
+- 流量（推荐设置，每张约 2.6 KB）：普通模式约 9 MB/小时，流畅模式（约每秒 1.5 帧）约 14 MB/小时。停止投屏后页面开着时仍在下载占位图，退出页面才会停。
 - 在家时可以让手机直接从电脑的局域网地址取图，少走一段公网，见 [docs/deploy.md 的方案 D：局域网直连](deploy.md#5-方案-d局域网直连可选)（`tools/lan_https_proxy.py`，可选）。
 
 ## 附录 A：start_cast 返回字段
@@ -418,12 +418,13 @@ uv run python tools/simulator/serve.py
 | `success` | 是否成功 | SKILL.md 判断成功或播报失败 |
 | `mode` | 实际的投屏模式：`image` / `fast` | 选择打开哪个页面 |
 | `url` | 图片地址 `https://cast.example.com/s/<KEY>/screen.jpg`；页面在后面拼上 `/<会话号>_<编号>.jpg` | 两个页面的 `dataSource.url` |
-| `hops` | 流畅模式页面每换一张图的跳数，`round(1000 / 帧率设置 / 20)`，1～25 | `cast-emit` 的 `dataSource.hops` |
-| `fps`、`fast_fps` | 调用之后生效的流畅模式帧率设置（1～10） | 播报「已调到每秒 N 张」 |
+| `hops` | 流畅模式页面每换一张图的跳数，`round(1000 / 档位 / 20)`，1～25 | `cast-emit` 的 `dataSource.hops` |
+| `fps`、`fast_fps` | 调用之后生效的流畅模式档位（1～10），不是帧数 | 播报「已调到 N 档，每秒约 X 帧」里的 N |
+| `device_fps` | 按 `hops` 估算的流畅模式真机每秒帧数，判断不了是否卡住 | 播报里的 X |
 | `width`、`height` | 图片尺寸 | 参考 |
 | `message` | 一句中文说明，失败时原样播报 | SKILL.md |
 | `timer_url`、`frame_duration_ms` | 只给 `cast-fast`（本地模拟器）用 | 平台上用不到 |
-| `page_fps` | 按模拟器速度估算的页面换图速率，不代表真机 | 参考 |
+| `page_fps` | 旧的估算，偏高，不代表真机，不要念给用户 | 参考 |
 
 ## 附录 B：平台上最终的文件结构
 

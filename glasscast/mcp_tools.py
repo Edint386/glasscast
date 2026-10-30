@@ -5,15 +5,16 @@ MCP 只做控制面（research.md §1 第 3 条、§2.5）：平台每次工具�
 
 - ``image``（普通模式）：页面 ``cast-image`` 的 ``<tick>`` 每秒换一次图片地址（research.md §2.2、§9.2 E1）。
 - ``fast``（流畅模式）：页面 ``cast-emit`` 用 emit 事件总线自环当节拍器，每 ``hops`` 跳换一张图
-  （research.md §9.8）。``hops`` 由本工具按 ``fast_fps`` 和每跳毫秒数估算后下发，所以改帧率不用改页面。
+  （research.md §9.8）。``hops`` 由本工具按 ``fast_fps`` 和每跳毫秒数估算后下发，所以改档位不用改页面。
   旧的 ``cast-fast``（``timer_url`` 指向的 2 帧 `.fset` 当定时器，research.md §9.2 E4、E9）过不了平台保存校验，
   ``timer_url``、``frame_duration_ms`` 仍保留在出参里，供参考页面使用。
 - 页面由大模型按 SKILL.md 调用平台的 UI 页面渲染工具打开（平台把 MCP 出参只当 ``content[0].text``
   交给模型，``ui_schema.json`` 的 Hook 不命中，research.md §9.5）。
-- 调帧率：``start_cast(mode="fast", fps=N)`` 先把运行时的 ``fast_fps`` 改成 N（1～10，
-  :func:`~glasscast.pipeline.parse_fast_fps`），再开始投屏；模型随后带新的 ``hops`` 再打开一次 cast-emit
-  （页面的 on-new-intent 写入新跳数）。``mode=image`` 时忽略 ``fps``（普通模式固定每秒 1 张），返回体里仍带
-  流畅模式的当前帧率。
+- 调档位：``fps`` / ``fast_fps`` 是档位（1～10），不是真实帧数；估算的真机帧数在出参 ``device_fps``
+  （:func:`~glasscast.pipeline.device_fps_for`）。``start_cast(mode="fast", fps=N)`` 先把运行时的 ``fast_fps``
+  改成 N（:func:`~glasscast.pipeline.parse_fast_fps`），再开始投屏；模型随后带新的 ``hops`` 再打开一次 cast-emit
+  （页面的 on-new-intent 写入新跳数）。``mode=image`` 时忽略 ``fps``（普通模式固定每秒 1 帧），返回体里仍带
+  流畅模式的当前档位。
 
 clip（`.fset` 分段流）已下线：``<frame-set>`` 无法换段（research.md §2.4、§9.2 E2），不再是对外选项；
 大模型如果仍传 ``clip``（例如旧版 SKILL.md），按"用户想要流畅"处理成 ``fast``，出参 ``mode`` 回传实际模式。
@@ -60,6 +61,7 @@ from .pipeline import (
     CastPipeline,
     FastFpsError,
     PublicMode,
+    device_fps_for,
     emit_hops_for,
     parse_fast_fps,
 )
@@ -128,45 +130,49 @@ _MODE_ALIASES: dict[str, PublicMode] = {
     "动画": "fast",
 }
 
-# 下面几段文案里的 {fast_fps} 在 build_mcp_server 里换成实际的 --fast-fps（用 str.replace，不用 format，
-# 免得文案里将来出现花括号时出错）
+# 下面几段文案里的 {fast_fps}（档位）和 {device_fps}（估算的真机每秒帧数）在 build_mcp_server 里换成实际的值
+# （用 str.replace，不用 format，免得文案里将来出现花括号时出错）
 _FAST_FPS_SLOT = "{fast_fps}"
+_DEVICE_FPS_SLOT = "{device_fps}"
 
 SERVER_INSTRUCTIONS = (
     "glasscast：把用户自己电脑的屏幕画面投到千问 AI 眼镜上。"
-    "start_cast 开始投屏，mode 默认 image（普通模式，每秒一张，最稳）；用户要求流畅/快速/看视频时用 fast（流畅模式，"
-    "默认每秒约 {fast_fps} 张，更费流量）。用户要调流畅模式的帧率（投屏调到 N 帧、每秒 N 张、快一点、慢一点）时调用 "
-    "start_cast(mode=fast, fps=N)，N 为 1～10，换档后按返回的 hops 再打开一次流畅模式页面；需要当前帧率时先调 cast_status 看 fast_fps。"
+    "start_cast 开始投屏，mode 默认 image（普通模式，每秒 1 帧，最稳）；用户要求流畅/快速/看视频时用 fast（流畅模式，"
+    "默认 {fast_fps} 档，每秒约 {device_fps} 帧，更费流量）。用户要调流畅模式的档位（投屏调到 N 档、投屏调到 N 帧、"
+    "每秒 N 张、快一点、慢一点）时调用 start_cast(mode=fast, fps=N)，N 为 1～10，是档位，不是真实帧数，"
+    "换档后按返回的 hops 再打开一次流畅模式页面；需要当前档位时先调 cast_status 看 fast_fps。"
     "start_cast 返回眼镜页面要拉取的地址；stop_cast 停止投屏；cast_status 查询投屏是否在进行、画面多久前更新、"
-    "流畅模式当前帧率。画面由眼镜页面自己刷新，不要为了刷新画面反复调用工具，也不要轮询状态。"
+    "流畅模式当前档位和估算的真机帧数（device_fps）。画面由眼镜页面自己刷新，不要为了刷新画面反复调用工具，也不要轮询状态。"
 )
 
-START_CAST_DESCRIPTION = """开始把用户电脑的屏幕画面投到眼镜上，在两种投屏模式之间切换，或调节流畅模式的帧率。
+START_CAST_DESCRIPTION = """开始把用户电脑的屏幕画面投到眼镜上，在两种投屏模式之间切换，或调节流畅模式的档位。
 
 何时调用：用户说"开始投屏""投屏""把电脑投到眼镜上""把电脑屏幕投过来""在眼镜上看电脑屏幕"时；
 已经在投屏、用户说"换成流畅模式""切到快速模式""换回普通模式"时也调用它切换；
-用户说"投屏调到 N 帧""每秒 N 张""快一点""慢一点""最流畅""最省流量"时用 mode=fast 加 fps 调帧率。
+用户说"投屏调到 N 档""投屏调到 N 帧""每秒 N 张""快一点""慢一点""最流畅""最省流量"时用 mode=fast 加 fps 调档位，
+这些话里的 N 原样当档位传入。
 每次用户请求只调用一次。
 
 不要用于：手机投屏、把眼镜画面投到电视或投影、拍照录像、远程操控电脑、朗读屏幕上的文字。
 
 参数 mode：
-- image（普通模式，默认）：每秒一张截图，延迟约 1～2 秒，最稳，适合看代码、文档、终端。
-- fast（流畅模式）：默认每秒约 {fast_fps} 张截图，画面更跟手，但更吃带宽和流量，网络差时可能卡顿；
+- image（普通模式，默认）：每秒 1 帧，延迟约 1～2 秒，最稳，适合看代码、文档、终端。
+- fast（流畅模式）：默认 {fast_fps} 档，每秒约 {device_fps} 帧，画面更跟手，但更吃带宽和流量，网络差时可能卡顿；
   用户说"流畅模式""快速模式""高帧率""看视频""看动画"时用它。
 没听清用户要哪种时用 image。
 
-参数 fps（可选，只对 fast 生效）：流畅模式每秒截图张数，范围 1～10，可以带小数（例如 2.5）；不传或为 null 时
-沿用当前帧率。要调帧率必须同时传 mode=fast；mode=image 时忽略 fps（普通模式固定每秒 1 张）。
+参数 fps（可选，只对 fast 生效）：流畅模式的档位，范围 1～10，可以带小数（例如 2.5）；不传或为 null 时沿用当前档位。
+档位不是帧数：档位 4 真机约每秒 1.5 帧。要调档位必须同时传 mode=fast；mode=image 时忽略 fps（普通模式固定每秒 1 帧）。
 超出 1～10 时返回 success=false，message 说明范围。换档成功后要带新的 hops 再打开一次流畅模式页面。
 
 返回 JSON 对象：success（是否成功）、mode（实际的投屏模式 image 或 fast）、url（页面拉取的图片地址）、
 timer_url（只给本地模拟器的 cast-fast 参考页面用，打开页面时不要传）、width、height（画面尺寸）、
-frame_duration_ms（同上，平台页面不用）、fps 和 fast_fps（调用之后生效的流畅模式帧率，两者相同）、
-hops（流畅模式页面每换一张图的事件跳数，打开流畅模式页面时原样放进 dataSource）、page_fps（页面按 hops
-估算的每秒拉图张数）、message（一句中文说明，失败时可直接念给用户）。
+frame_duration_ms（同上，平台页面不用）、fps 和 fast_fps（调用之后生效的流畅模式档位，两者相同，不是真实帧数）、
+device_fps（这个档位估算的真机每秒帧数，正常显示时的估算，判断不了画面是否卡住；mode=image 时也是流畅模式的值）、
+hops（流畅模式页面每换一张图的事件跳数，打开流畅模式页面时原样放进 dataSource）、page_fps（旧估算，比真机高，
+不要念给用户）、message（一句中文说明，失败时可直接念给用户）。
 成功后按 mode 打开眼镜页面（image 用 cast-image，fast 用 cast-emit），页面自己刷新画面；
-不要把 url、timer_url、hops 念给用户。"""
+不要把 url、timer_url、hops、page_fps 念给用户。"""
 
 STOP_CAST_DESCRIPTION = """停止投屏：电脑停止截屏，眼镜上的画面不再更新。
 
@@ -176,15 +182,16 @@ STOP_CAST_DESCRIPTION = """停止投屏：电脑停止截屏，眼镜上的画�
 CAST_STATUS_DESCRIPTION = """查询电脑投屏的当前状态。
 
 何时调用：用户问"投屏状态""投屏还在吗""投屏卡住了吗""画面多久没更新""现在是什么投屏模式""现在每秒几张"时；
-用户说"快一点""慢一点"要在当前帧率上加减时，先调用它拿 fast_fps。不要轮询。
+用户说"快一点""慢一点"要在当前档位上加减时，先调用它拿 fast_fps。不要轮询。
 返回 JSON 对象：success、active（是否正在投屏）、mode（image 普通模式 / fast 流畅模式 / off 未投屏）、
 last_frame_age_s（最近一帧是多少秒前截的，没有则为 null）、seq（画面序号）、consecutive_errors（连续截屏失败次数）、
-fast_fps（流畅模式当前帧率，每秒张数，范围 1～10）、fast_frame_duration_ms（只给本地模拟器的 cast-fast 参考页面用）、
+fast_fps（流畅模式当前档位，范围 1～10，不是真实帧数）、device_fps（这个档位估算的真机每秒帧数，和当前模式无关，
+正常显示时的估算，判断不了画面是否卡住）、fast_frame_duration_ms（只给本地模拟器的 cast-fast 参考页面用）、
 frame_duration_ms（同上，平台页面不用）、message（一句可以直接念给用户的中文状态）。"""
 
 MODE_PARAM_DESCRIPTION = (
-    "投屏模式：image（普通模式，默认，每秒一张截图，最稳）；"
-    "fast（流畅模式，每秒约 {fast_fps} 张，更吃带宽，用户要求流畅/快速/看视频时用）"
+    "投屏模式：image（普通模式，默认，每秒 1 帧，最稳）；"
+    "fast（流畅模式，默认 {fast_fps} 档，每秒约 {device_fps} 帧，更吃带宽，用户要求流畅/快速/看视频时用）"
 )
 
 # mode 的对外 JSON Schema（tools/list 里看到的样子）：只声明 image / fast 两个枚举值。
@@ -199,8 +206,9 @@ MODE_PARAM_SCHEMA: dict[str, Any] = {
 }
 
 FPS_PARAM_DESCRIPTION = (
-    f"流畅模式帧率（每秒截图张数），范围 {FAST_FPS_RANGE_TEXT}，可以带小数（例如 2.5）。只在 mode=fast 时生效，"
-    "mode=image 时忽略；不传或为 null 时沿用当前帧率。换档后要带新的 hops 再打开一次流畅模式页面"
+    f"流畅模式的档位，范围 {FAST_FPS_RANGE_TEXT}，可以带小数（例如 2.5）。档位不是帧数：档位 4 真机约每秒 1.5 帧。"
+    "用户说的 N 帧、每秒 N 张、N 档，N 都原样传入。只在 mode=fast 时生效，mode=image 时忽略；"
+    "不传或为 null 时沿用当前档位。换档后要带新的 hops 再打开一次流畅模式页面"
 )
 # fps 的对外 JSON Schema：number 且可为 null。用 OpenAPI 风格的 "nullable": true 而不是 "type": ["number", "null"]：
 # 平台会把 inputSchema 解析成自己的参数表（官方文档第 37 节 §5.4，类型按单个字符串理解），type 写成数组有解析
@@ -235,13 +243,15 @@ class StartCastResult(TypedDict, total=False):
     height: int
     #: fast：定时器每帧毫秒数 round(1000/fast_fps/2)，cast-fast 参考页面的 frame-duration 绑定它（平台页面不用）；image：1000
     frame_duration_ms: int
-    #: 调用之后生效的流畅模式帧率（每秒张数）：fast 模式即本次投屏的帧率；image 模式忽略 fps 参数，仍报流畅模式的当前值
+    #: 调用之后生效的流畅模式档位（不是真实帧数）：fast 模式即本次投屏的档位；image 模式忽略 fps 参数，仍报流畅模式的当前值
     fps: float
     #: 同 fps（与 cast_status、GET /admin/config 的同名字段一致）
     fast_fps: float
+    #: 这个档位估算的真机每秒帧数 device_fps_for(hops)，正常显示时的估算，判断不了是否卡住；image 模式也报流畅模式的值
+    device_fps: float
     #: cast-emit 页面每换一张图的事件跳数 round(1000/fast_fps/emit_hop_ms)，1～25（research.md §9.8）
     hops: int
-    #: 页面按 hops 估算的拉图速率 1000/(hops×emit_hop_ms)，张/秒
+    #: 旧估算 1000/(hops×emit_hop_ms)，比真机高，不要念给用户；真机每秒帧数看 device_fps
     page_fps: float
     #: 调用前的模式（off / image / fast）
     previous_mode: str
@@ -276,15 +286,17 @@ class CastStatusResult(TypedDict, total=False):
     clip_frames: int
     #: 与 start_cast 出参同义：fast → cast-fast 参考页面的定时器每帧毫秒数，image → 1000
     frame_duration_ms: int
-    #: 流畅模式当前帧率（每秒张数，运行中可被 start_cast(fps=…) / glasscast set-fps 改）
+    #: 流畅模式当前档位（不是真实帧数，运行中可被 start_cast(fps=…) / glasscast set-fps 改）
     fast_fps: float
+    #: 这个档位估算的真机每秒帧数 device_fps_for(hops)，与当前模式无关，正常显示时的估算，判断不了是否卡住
+    device_fps: float
     #: cast-fast 参考页面的定时器每帧毫秒数 round(1000/fast_fps/2)，与当前模式无关
     fast_frame_duration_ms: int
     error: str | None
 
 
 #: fps 不合法时念给用户的话（规格：用中文说明范围）
-FPS_RANGE_MESSAGE = f"帧率只能调到每秒 {FAST_FPS_MIN:g} 到 {FAST_FPS_MAX:g} 张，可以带小数"
+FPS_RANGE_MESSAGE = f"档位只能调到 {FAST_FPS_MIN:g} 到 {FAST_FPS_MAX:g}，可以带小数"
 
 
 def _is_blank(value: object) -> bool:
@@ -292,8 +304,13 @@ def _is_blank(value: object) -> bool:
     return value is None or (isinstance(value, str) and not value.strip())
 
 
-def _with_fast_fps(template: str, fast_fps: float) -> str:
-    return template.replace(_FAST_FPS_SLOT, f"{fast_fps:g}")
+def _with_rates(template: str, fast_fps: float, device_fps: float) -> str:
+    return template.replace(_FAST_FPS_SLOT, f"{fast_fps:g}").replace(_DEVICE_FPS_SLOT, f"{device_fps:g}")
+
+
+def _device_fps(settings: Settings, fast_fps: float) -> float:
+    """档位 ``fast_fps`` 估算的真机每秒帧数，换算用的 hops 与 start_cast 下发的一致。"""
+    return device_fps_for(emit_hops_for(fast_fps, settings.emit_hop_ms))
 
 
 def normalize_mode(value: object) -> PublicMode | None:
@@ -358,13 +375,14 @@ class CastController:
                 return {
                     "success": False,
                     "mode": target,
-                    "message": f"{FPS_RANGE_MESSAGE}，现在是每秒 {current:g} 张",
+                    "message": f"{FPS_RANGE_MESSAGE}，现在是 {current:g} 档",
                     "error": str(exc),
                     "fps": current,
                     "fast_fps": current,
+                    "device_fps": _device_fps(self.settings, current),
                 }
             # 先写入运行时 fast_fps 再开始：已在 fast 模式时 start() 什么也不做，节拍由 setter 立即重排；
-            # 之后的 _cast_payload 读到的就是新帧率对应的 frame_duration_ms
+            # 之后的 _cast_payload 读到的就是新档位对应的 frame_duration_ms
             pipeline.set_fast_fps(requested)
         previous = pipeline.mode
         before = pipeline.stats()
@@ -402,12 +420,12 @@ class CastController:
         payload = self._cast_payload(target)
         payload["previous_mode"] = previous
         payload["first_frame"] = self._has_frame() if first_frame is None else first_frame
-        retuned = target == "fast" and fps_given  # 这次调用改了（或重申了）流畅模式帧率
-        rate = f"每秒约 {payload['fps']:g} 帧"
+        retuned = target == "fast" and fps_given  # 这次调用改了（或重申了）流畅模式档位
+        rate = f"{payload['fps']:g} 档，每秒约 {payload['device_fps']:g} 帧"
         if restart:
             payload["message"] = f"投屏已重新开始（{MODE_LABELS[target]}）" + (f"，{rate}" if retuned else "")
         elif previous == target:
-            payload["message"] = f"流畅模式已调到{rate}" if retuned else f"投屏已在进行中（{MODE_LABELS[target]}）"
+            payload["message"] = f"流畅模式已调到 {rate}" if retuned else f"投屏已在进行中（{MODE_LABELS[target]}）"
         elif previous != "off":
             payload["message"] = f"已切换到{MODE_LABELS[target]}" + (f"，{rate}" if retuned else "")
         elif target == "image":
@@ -415,7 +433,7 @@ class CastController:
         else:
             payload["message"] = f"投屏已开始（流畅模式），{rate}"
         if target == "image" and fps_given:
-            payload["message"] += "（帧率只对流畅模式有效，普通模式固定每秒 1 张）"
+            payload["message"] += "（档位只对流畅模式有效，普通模式固定每秒 1 帧）"
         log.info(
             "start_cast: %s → %s%s%s",
             previous,
@@ -467,10 +485,10 @@ class CastController:
             "frame_duration_ms": fast_duration if mode == "fast" else pipeline.page_frame_duration_ms(mode),
             "fps": fast_fps,
             "fast_fps": fast_fps,
+            "device_fps": device_fps_for(hops),
             # cast-emit 页面（流畅模式，emit 事件总线自环）每换一张图的跳数，research.md §9.8
             "hops": hops,
-            # 页面按 hops 估算的拉图速率（张/秒）。fast_fps 低于下限时它会高于 fps：画面每秒仍只更新 fps 次，
-            # 多拉的是重复帧（只影响流量）
+            # 旧估算：按 emit_hop_ms 算的拉图速率，比真机高，不要念给用户（真机每秒帧数看 device_fps）
             "page_fps": round(1000.0 / (hops * settings.emit_hop_ms), 1),
             "message": "",
         }
@@ -507,7 +525,7 @@ class CastController:
             message = f"正在投屏，{label}，画面刚刚更新"
         else:
             message = f"正在投屏，但画面已经 {round(age)} 秒没更新了，请看一下电脑上的投屏程序"
-        # 字段与第一版相同（实现指南 §9.1：cast_status 不变）。frame_duration_ms 跟随当前模式，与 start_cast
+        # 第一版的字段都保留（实现指南 §9.1）。frame_duration_ms 跟随当前模式，与 start_cast
         # 出参含义一致：fast → 定时器每帧时长，image → 1000；off / 内部 clip 仍报 clip 段内帧时长。
         if mode == "fast":
             frame_duration = stats.get("fast_frame_duration_ms", stats["frame_duration_ms"])
@@ -530,6 +548,7 @@ class CastController:
             "frame_duration_ms": frame_duration,
             # 运行时的当前值（与 frame_duration_ms 不同，和当前模式无关），"快一点/慢一点"据此加减
             "fast_fps": stats["fast_fps"],
+            "device_fps": _device_fps(self.settings, stats["fast_fps"]),
             "fast_frame_duration_ms": stats["fast_frame_duration_ms"],
             "message": message,
         }
@@ -549,12 +568,13 @@ def build_mcp_server(
     """
     ctl = controller or CastController(settings, pipeline, first_frame_timeout_s=first_frame_timeout_s)
     fast_fps = pipeline.fast_fps
-    mode_schema = {**MODE_PARAM_SCHEMA, "description": _with_fast_fps(MODE_PARAM_DESCRIPTION, fast_fps)}
+    device_fps = _device_fps(settings, fast_fps)
+    mode_schema = {**MODE_PARAM_SCHEMA, "description": _with_rates(MODE_PARAM_DESCRIPTION, fast_fps, device_fps)}
     server: MCPServer = MCPServer(
         "glasscast",
         title="电脑投屏",
         description="把电脑屏幕投到千问 AI 眼镜：开始/停止投屏（普通或流畅模式）、查询投屏状态",
-        instructions=_with_fast_fps(SERVER_INSTRUCTIONS, fast_fps),
+        instructions=_with_rates(SERVER_INSTRUCTIONS, fast_fps, device_fps),
         version=__version__,
     )
 
@@ -584,7 +604,7 @@ def build_mcp_server(
     server.tool(
         name="start_cast",
         title="开始投屏",
-        description=_with_fast_fps(START_CAST_DESCRIPTION, fast_fps),
+        description=_with_rates(START_CAST_DESCRIPTION, fast_fps, device_fps),
         annotations=ToolAnnotations(
             title="开始投屏", readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False
         ),

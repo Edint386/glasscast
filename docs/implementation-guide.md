@@ -1,6 +1,6 @@
 # glasscast 实现指南
 
-> **先读这里**：这是 2026-10-23～10-24 写的原始设计规格，按当时的任务分工（任务 A～G）组织，后面几轮变更（§9、§10）只追加、不回改前文，所以前面的接口、页面写法和 clip 模式很多已经被推翻；文中的文件名和路径（例如 `pages/cast_clip/`、`deploy/openresty/…`、`cast-cert-renew.*`）也是当时的，后来有的移走或改了名，以仓库里的实际文件为准。**glasscast 现在的行为和用法以 [docs/usage.md](usage.md) 和 [docs/platform-setup.md](platform-setup.md) 为准**；真机上的最终结论见 [docs/research.md](research.md) §1 开头。代码注释里的"实现指南 §x"指本文。
+> **先读这里**：这是 2026-10-23～10-24 写的原始设计规格，按当时的任务分工（任务 A～G）组织，后面几轮变更（§9、§10）只追加、不回改前文，所以前面的接口、页面写法和 clip 模式很多已经被推翻；文中的文件名和路径（例如 `pages/cast_clip/`、`deploy/openresty/…`、`cast-cert-renew.*`）也是当时的，后来有的移走或改了名，以仓库里的实际文件为准。**glasscast 现在的行为和用法以 [docs/usage.md](usage.md) 和 [docs/platform-setup.md](platform-setup.md) 为准**；真机上的最终结论见 [docs/research.md](research.md) §1 开头。代码注释里的"实现指南 §x"指本文。文中讲调速时的"N 帧"（例如"投屏调到 N 帧"）和 §10 的"帧率"指现在叫"档位"的设置，不是真实帧数；`.fset` 的"48 帧""2 帧"说的是文件里的帧数。
 
 把电脑画面投到千问 AI 眼镜屏幕上的工具链。两套投屏方式共用一个进程：
 

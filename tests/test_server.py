@@ -422,7 +422,7 @@ def test_status_json(make_client: Callable[..., tuple[TestClient, CastPipeline]]
         "fast": {"template": "cast-emit", "hops": 1, "emit_hop_ms": 20.0},
     }
     assert body["source"] == "screen"
-    assert body["fast_fps"] == pipeline.fast_fps == 50.0  # 运行时当前值（fixture 的高帧率）
+    assert body["fast_fps"] == pipeline.fast_fps == 50.0  # 运行时当前值（fixture 用很高的档位加速）
     assert body["config"]["fast_fps"] == 4.0  # config 是启动参数（初始值）
     assert body["config"]["canvas"] == [640, 290]
     assert body["config"]["color_mode"] == "gray"
@@ -856,7 +856,7 @@ def test_query_string_is_ignored_on_every_route(
     assert client.get(f"/s/wrong-key/timer.fset{query}").status_code == 404
 
 
-# --------------------------------------------------------------------------- /admin（本机调帧率，不重启）
+# --------------------------------------------------------------------------- /admin（本机调档位，不重启）
 
 ADMIN_BAD_AUTH = [
     {},
@@ -896,6 +896,7 @@ def test_admin_config(make_client: Callable[..., tuple[TestClient, CastPipeline]
         "success": True,
         "mode": "off",
         "fast_fps": 4.0,
+        "device_fps": 1.5,  # 4 档估算的真机帧数
         "frame_duration_ms": 125,  # 流畅模式：round(1000 / 4 / 2)
         "image_fps": 1.0,
         "color_mode": "gray",
@@ -923,13 +924,16 @@ def test_admin_set_fps_takes_effect_without_restart(make_client: Callable[..., t
     assert (body["previous_fast_fps"], body["previous_frame_duration_ms"]) == (4.0, 125)
     assert body["warnings"] == []
     assert (body["hops"], body["previous_hops"]) == (25, 12)  # round(1000/2/20)、round(1000/4/20)
+    assert (body["device_fps"], body["previous_device_fps"]) == (1.0, 1.5)
     # 已打开的页面要等模型带新的 hops 再打开一次才按新节拍拉图
-    assert "hops=25" in body["message"] and "新的 hops" in body["message"]
+    assert body["message"].startswith("流畅模式已调到 2 档（真机约每秒 1 帧，hops=25），电脑端截帧立即生效；")
+    assert "「投屏调到 2 档」" in body["message"] and "新的 hops" in body["message"]
     assert (pipeline.fast_fps, pipeline.fast_frame_duration_ms, pipeline.mode) == (2.0, 250, "fast")
 
     # 立即反映到 config、status.json、timer.fset 的头和 MCP 出参上
     config = client.get("/admin/config", headers=AUTH).json()
     assert (config["fast_fps"], config["frame_duration_ms"], config["initial_fast_fps"]) == (2.0, 250, 4.0)
+    assert config["device_fps"] == 1.0
     status = client.get(f"/s/{KEY}/status.json").json()
     assert (status["fast_fps"], status["fast_frame_duration_ms"]) == (2.0, 250)
     assert status["page"]["fast"]["hops"] == 25
@@ -944,20 +948,23 @@ def test_admin_set_fps_takes_effect_without_restart(make_client: Callable[..., t
     }
     result = client.post("/mcp", json=call, headers={**MCP_HEADERS, **AUTH}).json()["result"]["structuredContent"]
     assert (result["frame_duration_ms"], result["fps"], result["fast_fps"]) == (250, 2.0, 2.0)
+    assert result["device_fps"] == 1.0
     status_call = {"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "cast_status", "arguments": {}}}
     status_result = client.post("/mcp", json=status_call, headers={**MCP_HEADERS, **AUTH}).json()["result"]
     assert status_result["structuredContent"]["fast_fps"] == 2.0
+    assert status_result["structuredContent"]["device_fps"] == 1.0
 
     # 小数、数字字符串都行；大于 4 带提醒（真机实测稳定上限，research.md §9.20）
     r = client.post("/admin/fps", json={"fps": "2.5"}, headers=AUTH)
     assert r.status_code == 200 and r.json()["frame_duration_ms"] == 200
+    assert (r.json()["device_fps"], r.json()["previous_device_fps"]) == (1.3, 1.0)
     r = client.post("/admin/fps", json={"fps": 4.5}, headers=AUTH)
-    assert r.status_code == 200 and any("堆积" in w for w in r.json()["warnings"])
+    assert r.status_code == 200 and any(w.startswith("档位 4.5 偏高") for w in r.json()["warnings"])
 
     pipeline.stop()
     r = client.post("/admin/fps", json={"fps": 3}, headers=AUTH)
     assert r.json()["mode"] == "off" and "下次切到流畅模式" in r.json()["message"]
-    assert pipeline.mode == "off"  # 改帧率不会开始投屏
+    assert pipeline.mode == "off"  # 改档位不会开始投屏
 
 
 @pytest.mark.parametrize(

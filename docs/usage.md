@@ -23,10 +23,10 @@
 
 | 项目 | 实际情况 |
 |---|---|
-| 普通模式（默认） | 约每秒 1 张，最稳。适合看代码、文档、终端 |
-| 流畅模式 | 帧率设置不等于实际张数：默认设置 4 时真机每张图间隔约 630～720 ms，约每秒 1.5 张，**这是实测的稳定上限**；设置 ≤ 2 时都约每秒 1 张（见 [§12](#12-已知问题与-todo)）；设到 4.5 以上有时会进入「卡住」状态（换图太快，没有一张能加载完，画面冻住，要重开页面或调低帧率） |
-| 延迟 | 约 1～2 秒 |
-| 每张图的固定开销 | 约 0.65 秒（手机下载 → 蓝牙传给眼镜 → 解码），和 2.5～4 KB 的图片体积关系不大，所以最好也就每秒 1.5～2 张 |
+| 普通模式（默认） | 约每秒 1 帧，最稳。适合看代码、文档、终端 |
+| 流畅模式 | 速度用档位（1～10）调，档位不是帧数。默认 4 档、图约 2.5 KB 时，真机每张图间隔约 630～720 ms，约每秒 1.5 帧，**这是实测的稳定上限**；1～2 档都约每秒 1 帧（这个数是按步数估算的，见 [§12](#12-已知问题与-todo)）；4.5 档以上有时会进入「卡住」状态（换图太快，没有一张能加载完，画面冻住，要调低档位、重开页面），4 档也出现过 |
+| 延迟 | 普通模式约 1～2 秒，流畅模式没有单独测过 |
+| 每张图的固定开销 | 约 0.65 秒（手机下载 → 蓝牙传给眼镜 → 解码），和 2.5～4 KB 的图片体积关系不大，所以真实帧数最高约每秒 1.5 帧 |
 | 显示 | 单色绿屏，没有颜色；亮的地方发光，黑的地方透明 |
 | 画布 | 页面画布 640×290 像素，由系统放在视野**左上角**，页面没法把它居中 |
 | 清晰度 | 整块屏幕缩到 480×218 后小字看不清；看代码、终端时建议只投一块区域（`GLASSCAST_REGION`） |
@@ -66,8 +66,9 @@ flowchart LR
 
 - **图片地址必须以 `.jpg` 结尾**。用 `?ts=` 查询串防缓存的地址能下载，但眼镜不显示，所以缓存破坏放在路径里。
 - **页面每刷新一次绑定，都会让还没加载完的 `<image>` 从头加载**。所以两次换图之间页面不能有任何刷新。
-- 普通模式：`<tick>` 每秒改一次图片地址，稳定每秒 1 张。
-- 流畅模式：页面给自己发 `emit://` 事件倒数，每换一张图倒数 `hops × 3` 步（真机每步约 13 ms），倒数期间不写 `data`、不刷新绑定。`hops` 由 `start_cast` 按帧率算出来、经页面的 `dataSource` 下发。
+- 普通模式：`<tick>` 每秒改一次图片地址，稳定每秒 1 帧。
+- 流畅模式：页面给自己发 `emit://` 事件倒数，每换一张图倒数 `hops × 3` 步（真机每步约 13 ms），倒数期间不写 `data`、不刷新绑定。`hops` 由 `start_cast` 按档位算出来、经页面的 `dataSource` 下发。
+- 档位（`fps` 参数）不是眼镜上的帧数。它决定两件事：电脑每秒截几张（4 档截 4 张），以及页面的倒数步数（`hops = round(1000 / 档位 / 20)`，限制在 1～25）。每张图还有约 0.65 秒的固定开销，所以真实帧数最高约每秒 1.5 帧，档位再高也不会更快，反而可能卡住。
 - 平台把 MCP 出参只当 `content[0].text` 交给大模型，`ui_schema.json` 的 Hook 在真机上不会触发，所以页面由大模型调用渲染工具打开，[`skill/ui_schema.json`](../skill/ui_schema.json) 是 `[]`。
 
 ## 3. 需要准备什么
@@ -128,7 +129,7 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST $B/mcp -H 'Content-Type: applic
   -d '{"jsonrpc":"2.0","id":4,"method":"tools/list","params":{}}'
 ```
 
-不重启改流畅模式帧率，再看当前模式、帧率、色彩、画布：
+不重启改流畅模式档位，再看当前模式、档位、色彩、画布：
 
 ```bash
 GLASSCAST_TOKEN=$TOKEN uv run glasscast set-fps 2
@@ -187,7 +188,7 @@ curl -s -X POST $B/mcp "${MCP[@]}" -d '{"jsonrpc":"2.0","id":5,"method":"tools/c
    | `GLASSCAST_FIT_MODE` | `crop` | 居中裁剪铺满，不留黑边（Mac 屏幕比画布高，上下会裁掉一部分） |
    | `GLASSCAST_JPEG_QUALITY` + `GLASSCAST_JPEG_TARGET_KB` | `90` + `2.6` | 尽量不超过约 2.6 KB（质量下限 10，文字很密时会超过；没装 mozjpeg 时超得更多），在这个体积内取最高质量 |
    | `GLASSCAST_JPEG_ENCODER` | `auto` | 装了 mozjpeg 就用它，否则用 Pillow |
-   | `GLASSCAST_FAST_FPS` | `4` | 流畅模式的稳定上限（真机约每秒 1.5 张） |
+   | `GLASSCAST_FAST_FPS` | `4` | 档位 4，流畅模式的稳定上限（真机约每秒 1.5 帧） |
 
    glasscast 不会自己读 `.env`，每次启动前用 `. ./.env` 载入（下面的命令都这样写）。
 
@@ -240,18 +241,20 @@ curl -s -X POST $B/mcp "${MCP[@]}" -d '{"jsonrpc":"2.0","id":5,"method":"tools/c
 
 | 你说 | 发生什么 | 眼镜回答 |
 |---|---|---|
-| 「开始投屏」「把电脑投到眼镜上」 | `start_cast(mode=image)`，打开 `cast-image`，约每秒 1 张 | 投屏已开始 |
+| 「开始投屏」「把电脑投到眼镜上」 | `start_cast(mode=image)`，打开 `cast-image`，约每秒 1 帧 | 投屏已开始 |
 | 「用流畅模式投屏」「投屏流畅一点」 | `start_cast(mode=fast)`，打开 `cast-emit` | 已用流畅模式投屏 |
 | 「换成普通模式」「省流量投屏」 | 切回普通模式 | 已换成普通模式 |
-| 「投屏调到 N 帧」「每秒 N 张」 | `start_cast(mode=fast, fps=N)`，带新的 `hops` 重新打开 `cast-emit`；N 取 1～10，可以带小数 | 已调到每秒 N 张 |
-| 「快一点」「慢一点」 | 先查当前帧率，再加减 1：「快一点」最多到 4，「慢一点」最低到 1 | 已调到每秒 N 张 |
-| 「最流畅」「最快」「最省流量」 | 帧率设置直接调到 4（前两个）或 1（最省流量） | 已调到每秒 N 张 |
-| 「投屏状态」「投屏还在吗」「现在每秒几张」 | `cast_status` | 例如「正在投屏，普通模式，画面刚刚更新」 |
+| 「投屏调到 N 档」「投屏调到 N 帧」「每秒 N 张」 | `start_cast(mode=fast, fps=N)`，带新的 `hops` 重新打开 `cast-emit`；N 按档位算，取 1～10，可以带小数 | 已调到 N 档，每秒约 X 帧 |
+| 「快一点」「慢一点」 | 先查当前档位，再加减 1：「快一点」最多到 4，「慢一点」最低到 1 | 已调到 N 档，每秒约 X 帧。普通模式下说「慢一点」时回答「现在是普通模式，每秒 1 帧，已经最省流量了」 |
+| 「最流畅」「最快」「最省流量」 | 档位直接调到 4（前两个）或 1（最省流量） | 已调到 N 档，每秒约 X 帧 |
+| 「投屏状态」「投屏还在吗」 | `cast_status` | 例如「正在投屏，普通模式，画面刚刚更新」 |
+| 「现在每秒几张」 | `cast_status` | 流畅模式下回答「流畅模式，每秒约 X 帧」，普通模式下回答「普通模式，每秒 1 帧」 |
 | 「停止投屏」「别投了」 | `stop_cast`：电脑停止截屏，页面显示「投屏已停止」 | 投屏已停止 |
 
-- 这里的 N 都是**帧率设置**，不是实际张数：设置 4 时真机约每秒 1.5 张（N ≤ 2 时都约每秒 1 张，见 [§12](#12-已知问题与-todo)）。**建议用 4 或更低**：4 是实测的稳定上限，所以「最流畅」「最快」「快一点」最多只调到 4。只有明确说出更大的数字（例如「投屏调到 6 帧」）才会超过它，设到 4.5 以上可能画面卡住，这时说「投屏调到 4 帧」。
+- N 是**档位**，不是帧数；X 是工具返回的 `device_fps`，按档位估算的真机帧数：1～2 档约每秒 1 帧，2.5 档约每秒 1.3 帧，3～4 档约每秒 1.5 帧。说「投屏调到 N 帧」「每秒 N 张」时，N 也按档位算（见 [§12](#12-已知问题与-todo)）。
+- **建议用 4 档或更低**：4 档是实测的稳定上限，所以「最流畅」「最快」「快一点」最多只调到 4。只有明确说出更大的数字（例如「投屏调到 6 档」）才会超过它，这时眼镜回答「已调到 6 档，档位偏高，画面可能卡住」。4.5 档以上可能画面卡住，这时说「投屏调到 4 档」。
 - 停止投屏不会关掉眼镜上的页面，用眼镜正常的返回手势离开即可。
-- 电脑上也能调帧率：`. ./.env && uv run glasscast set-fps 2`。电脑端截帧立即生效，但眼镜上**已经打开**的流畅模式页面要等下一次 `start_cast`（说「投屏调到 2 帧」）重新打开后才按新节拍换图。运行中改的值在重启 `glasscast serve` 后回到 `GLASSCAST_FAST_FPS`。
+- 电脑上也能调档位：`. ./.env && uv run glasscast set-fps 2`。电脑端截帧立即生效，但眼镜上**已经打开**的流畅模式页面要等下一次 `start_cast`（说「投屏调到 2 档」）重新打开后才按新节拍换图。运行中改的值在重启 `glasscast serve` 后回到 `GLASSCAST_FAST_FPS`。
 
 ## 7. 参考
 
@@ -263,7 +266,7 @@ curl -s -X POST $B/mcp "${MCP[@]}" -d '{"jsonrpc":"2.0","id":5,"method":"tools/c
 glasscast serve      启动 HTTP + MCP 服务（一个进程一个端口）
 glasscast snapshot   截一张并按画布处理后保存，用来调画布、区域和画质
 glasscast monitors   列出显示器坐标（给 --monitor / --region 用）
-glasscast set-fps    不重启地修改正在运行的 serve 的流畅模式帧率（调本机 POST /admin/fps）
+glasscast set-fps    不重启地修改正在运行的 serve 的流畅模式档位（调本机 POST /admin/fps）
 glasscast config     查看正在运行的 serve 的当前配置（调本机 GET /admin/config）
 glasscast fset       .fset 帧合集工具 build / inspect / extract（研究用）
 glasscast --version
@@ -290,8 +293,8 @@ glasscast --version
 | `--jpeg-encoder auto\|mozjpeg\|pillow` | `GLASSCAST_JPEG_ENCODER` | `auto` | `auto` | `auto`：找到 mozjpeg 就用它，否则用 Pillow |
 | `--color gray\|rgb` | `GLASSCAST_COLOR_MODE` | `gray` | `gray` | 输出色彩。`rgb` 只作对照，眼镜显示不出颜色 |
 | `--image-fps F` | `GLASSCAST_IMAGE_FPS` | `1` | | 普通模式截帧频率。页面每秒只拉一次，调高只能让拉到的画面更新一点，代价是 CPU；大于 2 时启动会提醒 |
-| `--fast-fps F` | `GLASSCAST_FAST_FPS` | `4` | `4` | 流畅模式帧率设置的**初始值**，1～10，可带小数，超出启动报错。真机实际约为它的一半张/秒。运行中可用 `start_cast(fps=…)` 或 `glasscast set-fps` 修改 |
-| `--emit-hop-ms MS` | `GLASSCAST_EMIT_HOP_MS` | `20` | | 流畅模式页面每一跳的估计毫秒数（5～500）。`start_cast` 下发 `hops = round(1000 / fast_fps / MS)`，限制在 1～25 |
+| `--fast-fps F` | `GLASSCAST_FAST_FPS` | `4` | `4` | 流畅模式**档位**的初始值，1～10，可带小数，超出启动报错。电脑每秒截这么多张，真机显示的帧数低得多（4 档约每秒 1.5 帧）。运行中可用 `start_cast(fps=…)` 或 `glasscast set-fps` 修改 |
+| `--emit-hop-ms MS` | `GLASSCAST_EMIT_HOP_MS` | `20` | | 流畅模式 hops 的换算系数（5～500），不是真机每跳耗时（真机每跳 3 步，约 39 ms）。`start_cast` 下发 `hops = round(1000 / 档位 / MS)`，限制在 1～25 |
 | `--gif-levels 0\|2\|4\|8\|16` | `GLASSCAST_GIF_LEVELS` | `0`（关闭） | | **实验**：每帧另出一张这么多级灰度的 GIF（`…/screen.jpg/<任意>.gif`） |
 | `--gif-delay-ms MS` | `GLASSCAST_GIF_DELAY_MS` | `100` | | **实验**：GIF 帧时长，0～655350 之间 10 的倍数 |
 | `--autostart off\|image\|fast` | `GLASSCAST_AUTOSTART` | `off` | | 启动后立即开始采集，不等 `start_cast` |
@@ -320,12 +323,12 @@ uv run glasscast fset extract FILE.fset OUTDIR [--prefix frame_] [--no-strict]
 
 - `snapshot`：截一张、按画布和色彩处理后保存（扩展名 `.png` 存 PNG，其余存 JPEG），打印尺寸、字节数和预算提醒。也读取同名的 `GLASSCAST_*` 环境变量，所以 `. ./.env && uv run glasscast snapshot t.jpg` 得到的就是眼镜上的画面。`--raw` 保存未缩放的原始截屏，用来量 `--region` 坐标。
 - `monitors`：列出显示器坐标（下标 0 是所有显示器的并集，1 是主屏）。macOS 是逻辑点，Retina 实际截图约 2 倍像素。
-- `set-fps`：FPS 取 1～10，可带小数（例如 2.5）。本地先校验，超出范围直接报错。
-- `config`：当前模式、流畅 / 普通模式帧率、帧时长、色彩、画布。
+- `set-fps`：FPS 是档位，取 1～10，可带小数（例如 2.5）。本地先校验，超出范围直接报错。输出里有真机帧数的估算。
+- `config`：当前模式、流畅档位（带真机帧数的估算）、普通模式帧率、帧时长、色彩、画布。
 - `set-fps` 和 `config` 都只连本机：`--host` 默认读 `GLASSCAST_HOST` 再默认 `127.0.0.1`，`--port` 默认读 `GLASSCAST_PORT` 再默认 `8766`，`--token` 默认读 `GLASSCAST_TOKEN`（先 `. ./.env`）。
 - `fset`：`.fset` 帧合集（`<frame-set>` 用的文件格式，见 [docs/research.md](research.md)）的打包、查看、拆帧。正常投屏用不到。
 
-返回码：0 成功；1 运行失败（截屏失败、文件读不了、连不上 glasscast、Token 不对等）；2 参数或配置错误（包括帧率超出 1～10）；3 启动失败（最常见的是端口被占用：`address already in use`，先停掉已有的 glasscast 或换 `--port`）。
+返回码：0 成功；1 运行失败（截屏失败、文件读不了、连不上 glasscast、Token 不对等）；2 参数或配置错误（包括档位超出 1～10）；3 启动失败（最常见的是端口被占用：`address already in use`，先停掉已有的 glasscast 或换 `--port`）。
 
 ### 7.2 环境变量
 
@@ -342,10 +345,10 @@ uv run glasscast fset extract FILE.fset OUTDIR [--prefix frame_] [--no-strict]
 | `GET /healthz` | `200 ok` |
 | `GET /s/{key}/screen.jpg` | 最新一张 JPEG（普通和流畅模式共用）；没有画面时返回同尺寸的占位图 |
 | `GET /s/{key}/screen.jpg/{stamp}` | 同上，`stamp` 任意。页面用 `…/screen.jpg/<会话>_<序号>.jpg`：地址必须以 `.jpg` 结尾眼镜才显示 |
-| `GET /s/{key}/status.json` | 采集统计 + 当前地址 + 页面参数 + 启动配置，不含 token。顶层 `fast_fps` 是运行中的当前值 |
+| `GET /s/{key}/status.json` | 采集统计 + 当前地址 + 页面参数 + 启动配置，不含 token。顶层 `fast_fps` 是运行中的当前档位 |
 | `POST /mcp` | MCP（见下节）。`GET /mcp` 带正确 token 时返回 405（无状态，只用 POST），不带 token 返回 401 |
-| `POST /admin/fps` | 本机管理接口：请求体 `{"fps": 2}`，不重启改流畅模式帧率。Bearer Token 同 `/mcp` |
-| `GET /admin/config` | 本机管理接口：当前模式、帧率、帧时长、`hops`、色彩、画布。Bearer Token 同 `/mcp` |
+| `POST /admin/fps` | 本机管理接口：请求体 `{"fps": 2}`（`fps` 是档位），不重启改流畅模式档位，返回里有 `device_fps`、`previous_device_fps`。Bearer Token 同 `/mcp` |
+| `GET /admin/config` | 本机管理接口：当前模式、档位、`device_fps`、帧时长、`hops`、色彩、画布。Bearer Token 同 `/mcp` |
 | `GET /s/{key}/timer.fset` | 参考页面 `pages/cast-fast` 用的定时器（内容固定的 2 帧 8×8 PNG `.fset`）。该页面只能在本地模拟器里跑 |
 | `GET /s/{key}/clip.fset`、`GET /s/{key}/clip/{n}.fset` | **实验**：已下线的 clip 分段流，平时返回占位段 |
 | `GET /s/{key}/screen.jpg/{stamp}.gif` | **实验**：同一帧的灰度 GIF，只在 `--gif-levels` 大于 0 时有，否则 404 |
@@ -366,24 +369,24 @@ uv run glasscast fset extract FILE.fset OUTDIR [--prefix frame_] [--no-strict]
 
 | 工具 | 参数 | 返回 |
 |---|---|---|
-| `start_cast` | `mode`：`image`（默认，普通模式）或 `fast`（流畅模式），也接受「普通」「流畅」「视频」等说法；`fps`（可选，number 或 null）：流畅模式帧率设置，1～10，可带小数，只对 `fast` 生效 | `success`、`message`、`mode`（实际模式）、`url`（页面拉取的图片地址）、`width`、`height`、`hops`（流畅模式页面每换一张图的跳数，1～25）、`fps` / `fast_fps`（生效的帧率设置）、`page_fps`（按 `hops` 估算的速率）、`frame_duration_ms`、`timer_url`（后两个给参考页面用）、`previous_mode`、`first_frame` |
+| `start_cast` | `mode`：`image`（默认，普通模式）或 `fast`（流畅模式），也接受「普通」「流畅」「视频」等说法；`fps`（可选，number 或 null）：流畅模式档位，1～10，可带小数，不是帧数，只对 `fast` 生效 | `success`、`message`、`mode`（实际模式）、`url`（页面拉取的图片地址）、`width`、`height`、`hops`（流畅模式页面每换一张图的跳数，1～25）、`fps` / `fast_fps`（生效的档位）、`device_fps`（按 `hops` 估算的流畅模式真机每秒帧数，判断不了是否卡住）、`page_fps`（旧的估算，偏高，不要念给用户）、`frame_duration_ms`、`timer_url`（后两个给参考页面用）、`previous_mode`、`first_frame` |
 | `stop_cast` | 无 | `success`、`message`、`previous_mode`。重复调用也安全 |
-| `cast_status` | 无 | `success`、`message`、`active`、`mode`（`off` / `image` / `fast`）、`last_frame_age_s`、`seq`、`frames_captured`、`capture_fps`、`consecutive_errors`、`errors`、`last_error`、`fast_fps`、`fast_frame_duration_ms`、`frame_duration_ms`、`clip_frames` |
+| `cast_status` | 无 | `success`、`message`、`active`、`mode`（`off` / `image` / `fast`）、`last_frame_age_s`、`seq`、`frames_captured`、`capture_fps`、`consecutive_errors`、`errors`、`last_error`、`fast_fps`（当前档位）、`device_fps`（含义同 `start_cast`）、`fast_frame_duration_ms`、`frame_duration_ms`、`clip_frames` |
 
 `start_cast(mode="fast", fps=4)` 的返回示例（推荐配置）：
 
 ```json
-{"success": true, "message": "投屏已开始（流畅模式），每秒约 4 帧", "mode": "fast",
+{"success": true, "message": "投屏已开始（流畅模式），4 档，每秒约 1.5 帧", "mode": "fast",
  "url": "https://cast.example.com/s/<KEY>/screen.jpg",
  "timer_url": "https://cast.example.com/s/<KEY>/timer.fset",
  "width": 480, "height": 218, "frame_duration_ms": 125,
- "fps": 4.0, "fast_fps": 4.0, "hops": 12, "page_fps": 4.2,
+ "fps": 4.0, "fast_fps": 4.0, "device_fps": 1.5, "hops": 12, "page_fps": 4.2,
  "previous_mode": "off", "first_frame": true}
 ```
 
-（`message` 里的「每秒约 4 帧」和 `page_fps` 都是按旧的换算估的，真机约每秒 1.5 张，见 [§12](#12-已知问题与-todo)。）
+（`fps` / `fast_fps` 是档位。`message` 和 `device_fps` 里的 1.5 是按 `hops` 估算的真机帧数。`page_fps` 是旧的估算，偏高，不要念给用户，见 [§12](#12-已知问题与-todo)。）
 
-成功后大模型按 SKILL.md 打开页面：普通模式 `ui_page_render(templateName="cast-image", dataSource={"url": …})`，流畅模式 `templateName="cast-emit"`、`dataSource` 带 `url` 和 `hops`。`fps` 不合法时什么都不改，返回 `success: false` 和「帧率只能调到每秒 1 到 10 张……」。`start_cast` 第一帧就截屏失败（多半是没有屏幕录制权限）时会停止采集并返回 `success: false`。
+成功后大模型按 SKILL.md 打开页面：普通模式 `ui_page_render(templateName="cast-image", dataSource={"url": …})`，流畅模式 `templateName="cast-emit"`、`dataSource` 带 `url` 和 `hops`。`mode=fast` 时 `fps` 不合法什么都不改，返回 `success: false` 和「档位只能调到 1 到 10，可以带小数，现在是 4 档」；`mode=image` 时 `fps` 被忽略，照常切到普通模式。`start_cast` 第一帧就截屏失败（多半是没有屏幕录制权限）时会停止采集并返回 `success: false`。
 
 ## 8. 安全
 
@@ -405,9 +408,9 @@ uv run glasscast fset extract FILE.fset OUTDIR [--prefix frame_] [--no-strict]
 | 说了「开始投屏」但眼镜上没出现页面 | 页面是大模型调用渲染工具打开的：检查 SKILL.md 里的 `XXXXXX` 是否都换成了你的插件编码、`^^tQ8fCF.ui_page_render^^` 有没有被改，两个页面名是否正好是 `cast-image`、`cast-emit` |
 | 页面打开了，但一直是黑的 | 图太大（用 `.env.example` 里的推荐参数：480×218、约 2.6 KB）；看 glasscast 访问日志里有没有 `screen.jpg/…jpg` 请求、状态码是不是 200 |
 | 画面是「等待画面…」、黑屏或只有桌面壁纸 | 没有屏幕录制权限（[§5](#5-完整部署清单) 第 2 步），或电脑锁屏 / 睡眠。`uv run glasscast snapshot test.jpg` 自查，用 `--source synthetic` 对照 |
-| 流畅模式画面冻住（右下角的换图编号不再增加） | 帧率设得太高，进入了「换图太快、一张都加载不完」的状态：说「投屏调到 4 帧」或更低，不行就用返回手势离开页面，再说「用流畅模式投屏」 |
-| 流畅模式并不比普通模式快多少 | 正常：每张图有约 0.65 秒固定开销，真机上限约每秒 1.5 张 |
-| `glasscast set-fps` 成功了，眼镜上节奏没变 | 已打开的页面在打开时就拿到了 `hops`，说「投屏调到 N 帧」让页面重新打开 |
+| 流畅模式画面冻住（画面不变，右下角的换图编号可能还在增加） | 档位太高，进入了「换图太快、一张都加载不完」的状态。这时页面还在换图，编号会继续增加，所以不能看编号判断。说「投屏调到 4 档」或更低，不行就用返回手势离开页面，再说「用流畅模式投屏」 |
+| 流畅模式并不比普通模式快多少 | 正常：每张图有约 0.65 秒固定开销，真机上限约每秒 1.5 帧 |
+| `glasscast set-fps` 成功了，眼镜上节奏没变 | 已打开的页面在打开时就拿到了 `hops`，说「投屏调到 N 档」让页面重新打开 |
 | `set-fps` / `config` 报「连不上」或 401 | serve 没在跑、端口不对，或 token 不一致（先 `. ./.env`） |
 | 停止投屏后页面还在 | 正常：页面显示「投屏已停止」，用眼镜的返回手势离开 |
 | 画面在视野左上角、不居中 | S1 系统把 640×290 的页面画布放在左上角，页面改不了 |
@@ -433,7 +436,7 @@ uv run pytest -q tools/simulator/test_serve.py
 
 | 测试文件 | 覆盖内容 |
 |---|---|
-| `tests/test_fset.py`、`test_frames.py`、`test_pipeline.py` | `.fset` 读写、缩放 / 裁剪 / 灰度 / JPEG 编码（含定体积编码、mozjpeg）、采集线程、运行中改帧率 |
+| `tests/test_fset.py`、`test_frames.py`、`test_pipeline.py` | `.fset` 读写、缩放 / 裁剪 / 灰度 / JPEG 编码（含定体积编码、mozjpeg）、采集线程、运行中改档位 |
 | `tests/test_server.py` | 全部路由、key 校验、占位图、通用响应头、Bearer 401、Host 421、GET 405、访问日志打码、`/admin/*` |
 | `tests/test_mcp.py` | 用 mcp 2.x 客户端走 initialize → tools/list → tools/call，出参 schema、模式归一化、`fps` 参数、截屏失败 |
 | `tests/test_cli.py` | 子进程启动 `serve`、信号退出、配置优先级与校验、`set-fps` / `config` |
@@ -457,7 +460,7 @@ uv run python tools/simulator/serve.py
 | `glasscast/config.py` | `Settings`、`load_settings()`（命令行 > 环境变量 > 默认值）、`ENV_VARS` |
 | `glasscast/server.py` | Starlette 应用：图片路由、占位图、`/admin/*`、Bearer 校验中间件、访问日志 |
 | `glasscast/mcp_tools.py` | 三个 MCP 工具（`CastController`）和 `build_mcp_server()` |
-| `glasscast/pipeline.py` | 采集线程 `CastPipeline`：按模式截帧、编码、发布最新一帧；帧率换算 |
+| `glasscast/pipeline.py` | 采集线程 `CastPipeline`：按模式截帧、编码、发布最新一帧；档位换算、真机帧数估算 |
 | `glasscast/frames.py` | 帧源（截屏 / 合成）、缩放裁剪、灰度、JPEG / PNG / GIF 编码、mozjpeg、占位图 |
 | `glasscast/fset.py` | `.fset` 帧合集格式的读写 |
 | `glasscast/probe.py` | 真机探针用的测试文件（实验） |
@@ -500,15 +503,17 @@ tests/                     pytest
 
 ## 12. 已知问题与 TODO
 
-- **fps 换算校准**：流畅模式的「帧率」现在只是一个设置值，真机实际比它低（设 4 约每秒 1.5 张）。代码、工具描述、`message`（「每秒约 N 帧」）、`page_fps` 和 SKILL.md 的话术（「已调到每秒 N 张」）仍按旧换算 `hops = round(1000 / N / 20)` 来说，都偏高。TODO：重新标定 `emit_hop_ms` 或换算公式，让 fps 等于真机的每秒张数，并把可调范围限制在稳定区间内。
-- **帧率设置 ≤ 2 时节奏相同**：帧率设置 ≤ 2 时 `hops` 都封顶 25（75 步，按每步 13 ms 估算约 1 秒），所以设置 1、1.5、2 的页面换图节奏相同，约每秒 1 张；从 2 调到 1 只减少电脑截帧，不改变眼镜上的节奏。
-- **高帧率会卡住**：设到 4.5 以上有时进入画面冻住的状态。SKILL.md 已把「最流畅」「最快」「快一点」限制在 4 以内，但工具本身仍接受 1～10，用户明确说出更大的数字时照传。TODO：校准后收紧工具的上限。
+- **档位不是帧数**：流畅模式的 `fps` / `fast_fps` 是档位。`message`、`device_fps` 和 SKILL.md 的话术现在都按 `hops` 估算真机帧数（4 档约每秒 1.5 帧）。这个估算来自 S1 上 2.5～4 KB 图片的测试，只说明正常显示时的速度，判断不了页面是否卡住。还没做完的两件事：
+  - TODO：说「投屏调到 N 帧」「每秒 N 张」时，N 仍按档位传，所以「调到 2 帧」设的是 2 档，真机约每秒 1 帧，N 不是真实帧数。
+  - TODO：`page_fps` 还是旧的估算（`1000 / (hops × emit_hop_ms)`），偏高（4 档时是 4.2），不要念给用户。
+- **1～2 档节奏相同**：1～2 档时 `hops` 都封顶 25（75 步，按每步 13 ms 估算约 1 秒，没有直接测过），所以 1、1.5、2 档的页面换图节奏相同，约每秒 1 帧；从 2 档调到 1 档只减少电脑截帧，不改变眼镜上的节奏。
+- **档位高了会卡住**：4.5 档以上有时进入画面冻住的状态，4 档也出现过。SKILL.md 已把「最流畅」「最快」「快一点」限制在 4 以内，但工具本身仍接受 1～10，用户明确说出更大的数字时照传。TODO：收紧工具的上限。
 - **代码默认画布在真机上不显示**：默认 640×290 + 质量 70 的图太大。目前靠 `.env.example` 的推荐值；TODO：把默认值改成真机可用的组合。
-- **流畅模式的天花板**：每张图约 0.65 秒的固定开销决定了上限约每秒 1.5 张。想更快只能一次下载里装多帧（`.fset` / `.gif` 片段、拼图 JPEG），相关探针（实验路由 `gif`、`probe`、`clip`）还在验证中，见 docs/research.md 最后几节。
+- **流畅模式的天花板**：每张图约 0.65 秒的固定开销决定了上限约每秒 1.5 帧。想更快只能一次下载里装多帧（`.fset` / `.gif` 片段、拼图 JPEG），相关探针（实验路由 `gif`、`probe`、`clip`）还在验证中，见 docs/research.md 最后几节。
 - 部分出参字段（`frame_duration_ms`、`timer_url`）和启动时打印的定时器地址来自旧的 `cast-fast` 页面，现在只给参考页面用。
 - 停止投屏不会关闭眼镜上的页面（在真机上调用渲染工具反而会把页面重新打开），要用返回手势离开。
 - 平台调用工具约 3 秒超时，慢链路上偶尔失败，SKILL.md 让模型重试一次。
 - 只在 macOS 上测过；Linux / Windows 的截屏（mss）理论上能用，但没测，屏幕录制权限的提示也只针对 macOS。
 - 只有画面没有声音；没有在眼镜上操作电脑的能力。
 
-欢迎提 issue 和 PR，尤其是其他系统上的测试结果和 fps 校准数据。
+欢迎提 issue 和 PR，尤其是其他系统上的测试结果和真机帧数的实测数据。

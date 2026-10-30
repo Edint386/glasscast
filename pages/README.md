@@ -4,8 +4,8 @@
 
 | 目录 | 是什么 | 放到平台上？ |
 |---|---|---|
-| `cast-image/` | **普通模式**（默认）。`<tick>` 每秒改一次图片地址，真机约每秒 1 张、延迟 1～2 秒，最稳。 | 是，`Pages/cast-image` |
-| `cast-emit/` | **流畅模式**。页面给自己发 `emit://` 事件倒数当节拍器，每换一张图倒数 `hops × 3` 步（真机每步约 13 毫秒），倒数过程中不刷新绑定。帧率设置 4（`hops` 12）时真机约每秒 1.5 张，这是实测稳定上限。 | 是，`Pages/cast-emit` |
+| `cast-image/` | **普通模式**（默认）。`<tick>` 每秒改一次图片地址，真机约每秒 1 帧、延迟 1～2 秒，最稳。 | 是，`Pages/cast-image` |
+| `cast-emit/` | **流畅模式**。页面给自己发 `emit://` 事件倒数当节拍器，每换一张图倒数 `hops × 3` 步（真机每步约 13 毫秒），倒数过程中不刷新绑定。真机上 1～2 档约每秒 1 帧，3～4 档约每秒 1.5 帧；4 档（`hops` 12）是实测稳定上限。 | 是，`Pages/cast-emit` |
 | `cast-fast/` | 旧的流畅模式：把 2 帧 8×8 的 `.fset` 帧合集当定时器。平台保存校验（`URI-001`）不放行 `<frame-set action="{{…}}">`，**只能在本地模拟器里跑**。 | 否，只用于 `tools/simulator` |
 
 在平台上怎么建这两个页面，见 [docs/platform-setup.md](../docs/platform-setup.md) 第 6 步。页面名就是目录名，必须原样使用（SKILL.md 按名字打开）。
@@ -21,7 +21,7 @@
 | 页面 | 字段 | 来源 |
 |---|---|---|
 | `cast-image` | `url` | `start_cast` 返回的 `url`，即 `https://cast.example.com/s/<KEY>/screen.jpg` |
-| `cast-emit` | `url`、`hops` | `start_cast(mode="fast", fps=N)` 返回的 `url` 和 `hops = round(1000 / N / 20)`（1～25）。没有 `hops` 时页面按最慢档（25）跑 |
+| `cast-emit` | `url`、`hops` | `start_cast(mode="fast", fps=N)` 返回的 `url` 和 `hops = round(1000 / N / 20)`（N 是档位，`hops` 取 1～25）。没有 `hops` 时页面按最大值 25 跑，换图最慢 |
 | `cast-fast` | `url`、`timer_url`、`frame_duration_ms` | `start_cast(mode="fast")` 的返回（仅模拟器） |
 
 页面里的绑定都写成 `{{url}}{{structuredContent.url}}` 这样的两段拼接：不管数据是平铺的还是包在 MCP 的 `structuredContent` 里，都只有一段有值。页面在 `url` 后面拼上 `/<会话号>_<编号>.jpg` 作为每张图的地址，glasscast 把 `/s/<KEY>/screen.jpg/<任意>.jpg` 当作 `screen.jpg` 处理。
@@ -33,7 +33,7 @@
 - `data` 里只放小整数：超过 2147483647 的数在真机上会被卡在这个值（模拟器不会），所以时间戳不能存进 `data`。
 - 根 `view` 下最多 64 个子元素，超过后整页解析失败。
 - 所有 URI 属性都要以平台允许的 scheme 开头（`data://`、`emit://`、`event://` 等），否则保存时被 `URI-001` 拒绝。
-- `<gif>`、`<frame-set>` 的 `src` 只在节点创建时取值一次，之后改它不会重新下载。
+- `<gif>`、`<frame-set>` 的 `src` 只在节点创建时取值一次，之后改它不会重新下载（模拟器实测，真机没测过）。
 - S1 的页面画布是 640×290，系统把它放在视野左上角，页面里没法居中；图片框写 640×290 即可。
 - 远程图片解码后最多 742 400 字节、文件最多 1 MiB；真机上还要更小，推荐用 `.env.example` 的设置（480×218 灰度，每张约 2.6 KB）。
 

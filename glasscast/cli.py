@@ -6,7 +6,7 @@
 - ``glasscast snapshot OUT.jpg``：截一张并按画布处理，用来调分辨率 / 裁剪区域。
 - ``glasscast monitors``：列出显示器（给 ``--monitor`` / ``--region`` 用）。
 - ``glasscast fset build|inspect|extract``：`.fset` 帧合集工具（格式见 research.md §4）。
-- ``glasscast set-fps FPS``：不重启地修改正在运行的 serve 的流畅模式帧率（``POST /admin/fps``）。
+- ``glasscast set-fps FPS``：不重启地修改正在运行的 serve 的流畅模式档位（``POST /admin/fps``）。
 - ``glasscast config``：查看正在运行的 serve 的当前配置（``GET /admin/config``）。
 
 配置优先级：命令行 > 环境变量 ``GLASSCAST_*`` > 默认值（见 :mod:`glasscast.config`）。
@@ -57,7 +57,7 @@ from .frames import (
     list_monitors,
 )
 from .fset import FsetError, build_fset, detect_frame_format, inspect_fset, parse_fset
-from .pipeline import FAST_FPS_RANGE_TEXT, emit_hops_for, parse_fast_fps
+from .pipeline import FAST_FPS_RANGE_TEXT, device_fps_for, emit_hops_for, parse_fast_fps
 
 if TYPE_CHECKING:  # httpx 只在 set-fps / config 里用到，运行时延迟导入
     import httpx
@@ -171,8 +171,8 @@ def build_parser() -> argparse.ArgumentParser:
         prog="glasscast",
         description=(
             "把电脑屏幕投到千问 AI 眼镜，MCP 控制。两种模式都是眼镜页面轮询灰度 JPEG："
-            "image（普通，cast-image 页面，每秒 1 张）与 fast（流畅，cast-emit 页面用 emit:// 事件倒数换图，"
-            "帧率设置不等于实际张数，默认 4 时真机约每秒 1.5 张，research.md §9.19、§9.20）。"
+            "image（普通，cast-image 页面，每秒 1 帧）与 fast（流畅，cast-emit 页面用 emit:// 事件倒数换图，"
+            "档位不等于真实帧数，默认 4 档时真机约每秒 1.5 帧，research.md §9.19、§9.20）。"
         ),
     )
     parser.add_argument("--version", action="version", version=f"glasscast {__version__}")
@@ -213,16 +213,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--fast-fps",
         type=float,
         metavar="F",
-        help=f"fast（流畅）模式的帧率设置（{FAST_FPS_RANGE_TEXT}，可带小数），默认 4。cast-emit 页面每换一张图倒数 hops × 3 步，"
-        "hops 按 --emit-hop-ms 换算、经 start_cast 出参下发。真机实际低于 F：设 4 约每秒 1.5 张，是实测稳定上限，"
-        "4.5 以上可能卡住；不稳时调低（例如 2）",
+        help=f"fast（流畅）模式的档位（{FAST_FPS_RANGE_TEXT}，可带小数），默认 4。电脑每秒截 F 张；cast-emit 页面每换一张图倒数 hops × 3 步，"
+        "hops 按 --emit-hop-ms 换算、经 start_cast 出参下发。真机帧数低于 F：4 档约每秒 1.5 帧，是实测稳定上限，"
+        "4.5 以上可能卡住；不稳时调低（例如 2 档，约每秒 1 帧）",
     )
     serve.add_argument(
         "--emit-hop-ms",
         type=float,
         metavar="MS",
-        help="cast-emit 页面每一跳的估计耗时（毫秒，默认 20）。start_cast 出参 hops = round(1000/fast_fps/MS)；"
-        "真机实际帧率偏离目标时按日志里的图片请求间隔调整（research.md §9.8）",
+        help="cast-emit 页面 hops 的换算系数（毫秒，默认 20），不是真机每跳耗时（真机每跳 3 步，约 39 ms）。"
+        "start_cast 出参 hops = round(1000/fast_fps/MS)；"
+        "要微调真机换图节拍时按日志里的图片请求间隔调整（research.md §9.8）",
     )
     serve.add_argument(
         "--gif-levels",
@@ -322,23 +323,24 @@ def build_parser() -> argparse.ArgumentParser:
     # ---- set-fps / config（本机管理接口，不重启）
     set_fps = sub.add_parser(
         "set-fps",
-        help=f"不重启地修改流畅模式帧率（{FAST_FPS_RANGE_TEXT}）",
+        help=f"不重启地修改流畅模式档位（{FAST_FPS_RANGE_TEXT}）",
         description=(
-            f"把正在运行的 glasscast serve 的流畅模式帧率改成 FPS（每秒张数，{FAST_FPS_RANGE_TEXT}，可以带小数，例如 2.5），"
-            "调用本机的 POST /admin/fps。电脑端截帧立即按新帧率进行；眼镜上已打开的流畅模式页面要等下一次 "
-            "start_cast（对眼镜说「投屏调到 N 帧」或「切到流畅模式」，模型会带新的 hops 再打开一次页面）才按新节拍拉图。"
+            f"把正在运行的 glasscast serve 的流畅模式档位改成 FPS（{FAST_FPS_RANGE_TEXT}，可以带小数，例如 2.5），"
+            "调用本机的 POST /admin/fps。档位不是真实帧数：4 档真机约每秒 1.5 帧。电脑端截帧立即按新档位进行；"
+            "眼镜上已打开的流畅模式页面要等下一次 "
+            "start_cast（对眼镜说「投屏调到 N 档」或「切到流畅模式」，模型会带新的 hops 再打开一次页面）才按新节拍拉图。"
         ),
     )
     set_fps.add_argument(
-        "fps", metavar="FPS", type=_argtype(_fps_arg, "fps"), help=f"每秒张数，{FAST_FPS_RANGE_TEXT}，可以带小数"
+        "fps", metavar="FPS", type=_argtype(_fps_arg, "fps"), help=f"档位，{FAST_FPS_RANGE_TEXT}，可以带小数"
     )
     _add_admin_options(set_fps)
     set_fps.set_defaults(handler=cmd_set_fps)
 
     config = sub.add_parser(
         "config",
-        help="查看正在运行的 glasscast 的当前配置（模式、帧率、色彩、画布）",
-        description="调用本机的 GET /admin/config，显示运行中的模式、流畅/普通模式帧率、帧时长、色彩和画布。",
+        help="查看正在运行的 glasscast 的当前配置（模式、档位、色彩、画布）",
+        description="调用本机的 GET /admin/config，显示运行中的模式、流畅模式档位和真机帧数、普通模式截帧频率、帧时长、色彩和画布。",
     )
     _add_admin_options(config)
     config.set_defaults(handler=cmd_config)
@@ -388,7 +390,7 @@ _COLOR_LABELS = {"gray": "灰度", "rgb": "彩色"}
 
 def configure_logging(level: str = "info") -> None:
     numeric = getattr(logging, level.upper(), logging.INFO)
-    # 时间戳带毫秒：要从访问日志里核对 cast-emit 的换图间隔（真机设 4 时约 500 ms）。
+    # 时间戳带毫秒：要从访问日志里核对 cast-emit 的换图间隔（真机 4 档约 630～720 ms）。
     logging.basicConfig(
         level=numeric,
         format="%(asctime)s.%(msecs)03d %(levelname)-7s %(name)s: %(message)s",
@@ -496,15 +498,16 @@ def print_banner(
         line("Token", f"来自环境变量 {ENV_VARS['token']}（不显示）")
     if settings.cast_key_generated:
         line("cast_key", f"随机生成（每次启动都变；用 {ENV_VARS['cast_key']} 固定）")
-    line("普通模式", f"image：截帧 {settings.image_fps:g} fps，页面 <tick> 每秒拉一张")
+    line("普通模式", f"image：截帧 {settings.image_fps:g} fps，页面 <tick> 每秒 1 帧")
+    hops = emit_hops_for(settings.fast_fps, settings.emit_hop_ms)
     line(
         "流畅模式",
-        f"fast：截帧 {settings.fast_fps:g} fps；cast-emit 页面每 {emit_hops_for(settings.fast_fps, settings.emit_hop_ms)} 跳换一张"
-        f"（每跳按 {settings.emit_hop_ms:g} ms 估算，start_cast 出参 hops 下发，research.md §9.8）",
+        f"fast：{settings.fast_fps:g} 档，真机约每秒 {device_fps_for(hops):g} 帧；电脑每秒截 {settings.fast_fps:g} 张，"
+        f"cast-emit 页面每 {hops} 跳换一张（hops 按换算系数 {settings.emit_hop_ms:g} 算出，它不是真机每跳耗时，由 start_cast 出参下发，research.md §9.8）",
     )
     line(
-        "调帧率",
-        f"运行中可调（{FAST_FPS_RANGE_TEXT}）：对眼镜说「投屏调到 N 帧」，或在电脑上运行 glasscast set-fps N",
+        "调档位",
+        f"运行中可调（{FAST_FPS_RANGE_TEXT}）：对眼镜说「投屏调到 N 档」，或在电脑上运行 glasscast set-fps N",
     )
     line("自动开始", settings.autostart if settings.autostart != "off" else "否（等平台调用 start_cast）")
 
@@ -924,8 +927,9 @@ def cmd_set_fps(args: argparse.Namespace) -> int:
         return EXIT_OK
     mode = str(data.get("mode", "?"))
     print(
-        f"流畅模式帧率：每秒 {_num(data.get('previous_fast_fps'))} → {_num(data.get('fast_fps'))} 张"
-        f"（cast-emit 页面 hops {_num(data.get('previous_hops'))} → {_num(data.get('hops'))}），"
+        f"流畅模式档位：{_num(data.get('previous_fast_fps'))} → {_num(data.get('fast_fps'))}"
+        f"（真机约每秒 {_num(data.get('previous_device_fps'))} → {_num(data.get('device_fps'))} 帧，"
+        f"cast-emit 页面 hops {_num(data.get('previous_hops'))} → {_num(data.get('hops'))}），"
         f"当前{_MODE_LABELS.get(mode, mode)}"
     )
     if data.get("message"):
@@ -952,11 +956,12 @@ def cmd_config(args: argparse.Namespace) -> int:
     print(f"glasscast 当前配置（{base}）")
     line("模式", f"{mode}（{_MODE_LABELS.get(mode, mode)}）")
     line(
-        "流畅帧率",
-        f"每秒 {_num(data.get('fast_fps'))} 张，frame_duration_ms={_num(data.get('frame_duration_ms'))}"
+        "流畅档位",
+        f"{_num(data.get('fast_fps'))} 档（真机约每秒 {_num(data.get('device_fps'))} 帧），"
+        f"frame_duration_ms={_num(data.get('frame_duration_ms'))}"
         f"（启动时 {_num(data.get('initial_fast_fps'))}；可调 {_num(fps_range[0])}～{_num(fps_range[1])}：glasscast set-fps N）",
     )
-    line("普通帧率", f"截帧 {_num(data.get('image_fps'))} fps（页面每秒拉一张）")
+    line("普通帧率", f"截帧 {_num(data.get('image_fps'))} fps（页面每秒 1 帧）")
     line("色彩", str(data.get("color_mode", "?")))
     line("画布", f"{_num(canvas[0])}×{_num(canvas[1])}")
     return EXIT_OK

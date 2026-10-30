@@ -18,7 +18,7 @@
     必须与服务端一致：
       total-frames="2"、width="8" height="8" 必须等于 glasscast timer.fset 的帧数和帧尺寸（build_timer_fset 的默认值）：
       .fset 文件头里只有帧数和偏移，没有帧尺寸，全靠这里的 XML 声明（research.md 4）。
-      frame-duration 不写死，绑定工具出参 frame_duration_ms，改帧率不用改本页。
+      frame-duration 不写死，绑定工具出参 frame_duration_ms，改档位不用改本页。
 
     模拟器实测（2026-10-24，内核 waft-lite v0.2.11，接真实 glasscast，合成画面、灰度 JPEG 640 × 290）：
       frame_duration_ms 为 125 时图片拉取间隔中位数 266 ms，约 3.8 张每秒；为 200 时中位数 418 ms，说明页面确实采用了

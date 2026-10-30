@@ -123,8 +123,9 @@ def test_help_subprocess() -> None:
         assert run_cli(*sub).returncode == 0
     set_fps = run_cli("set-fps", "--help")
     assert set_fps.returncode == 0
-    for option in ("--port", "--host", "--token", "GLASSCAST_TOKEN", "1～10"):
+    for option in ("--port", "--host", "--token", "GLASSCAST_TOKEN", "1～10", "档位"):
         assert option in set_fps.stdout, option
+    assert "每秒张数" not in set_fps.stdout  # 档位不是每秒张数的承诺，真实帧数低得多
     assert run_cli("config", "--help").returncode == 0
 
 
@@ -651,7 +652,9 @@ def test_banner_variants() -> None:
     assert "2880×1800" in text
     assert "全黑" in text
     assert "timer.fset" in text and "cast-emit 页面每 12 跳换一张" in text
-    assert "每跳按 20 ms 估算" in text  # 帧合集定时器页已不再是流畅模式页面，横幅改讲 emit 跳数
+    assert "换算系数 20" in text  # 帧合集定时器页已不再是流畅模式页面，横幅改讲 emit 跳数
+    assert "fast：4 档，真机约每秒 1.5 帧；电脑每秒截 4 张" in text
+    assert "「投屏调到 N 档」" in text and "glasscast set-fps N" in text
     assert "灰度 JPEG" in text
     assert "clip" not in text
 
@@ -678,7 +681,8 @@ def test_banner_variants() -> None:
     assert "屏幕录制" not in text  # 合成画面不需要权限提示
     assert "本机地址" in text  # public_url 是 localhost 的警告
     assert "自动开始   fast" in text
-    assert "每 10 跳换一张" in text and "截帧 5 fps" in text  # round(1000/5/20) = 10
+    assert "每 10 跳换一张" in text  # round(1000/5/20) = 10
+    assert "fast：5 档，真机约每秒 1.5 帧；电脑每秒截 5 张" in text
     assert "彩色 JPEG" in text and "单色绿" in text  # rgb 的提醒
 
 
@@ -964,8 +968,8 @@ def test_warnings() -> None:
     assert "0.5/F" in warnings(image_fps=5)  # 调高只缩短画面年龄，不是"没有意义"
     assert "image_fps" not in warnings(image_fps=2)  # 2 fps 把平均画面年龄从约 0.5 s 降到约 0.25 s，不提醒
     assert "不高于" in warnings(fast_fps=1)
-    assert "堆积" in warnings(fast_fps=4.5)  # 大于 4 提醒：4 是真机实测稳定上限（research.md §9.20）
-    assert "堆积" not in warnings(fast_fps=4)
+    assert "档位 4.5 偏高" in warnings(fast_fps=4.5)  # 大于 4 提醒：4 档是真机实测稳定上限（research.md §9.20）
+    assert "偏高" not in warnings(fast_fps=4)
     # 超出 1～10 不再静默截到 1000 ms，而是直接报错（与运行中 start_cast(fps=…) / set-fps 同一个范围）
     for bad in (0.25, 0.5, 10.5, 20):
         with pytest.raises(ConfigError, match="fast_fps"):
@@ -986,7 +990,7 @@ def test_serve_sigterm_exits_cleanly(served: dict[str, Any]) -> None:
 
 
 def test_log_timestamps_have_milliseconds() -> None:
-    """访问日志时间戳带毫秒：核对 fast 页面约 250 ms 一张的拉图间隔要用（research.md §9.2 E4）。"""
+    """访问日志时间戳带毫秒：核对流畅模式换图间隔（4 档约 630～720 ms）要用（research.md §9.20）。"""
     import logging
     import re
 
@@ -1007,7 +1011,7 @@ def test_log_timestamps_have_milliseconds() -> None:
         root.setLevel(saved_level)
 
 
-# =========================================================================== set-fps / config（不重启调帧率）
+# =========================================================================== set-fps / config（不重启调档位）
 
 
 def _mcp_call(client: httpx.Client, token: str, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -1025,7 +1029,7 @@ def _mcp_call(client: httpx.Client, token: str, name: str, arguments: dict[str, 
 def test_set_fps_and_config_against_real_server(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """真实启动 serve（--autostart fast），用 set-fps / config 子命令改帧率并核对 MCP、status.json（实现指南 §8 风格）。"""
+    """真实启动 serve（--autostart fast），用 set-fps / config 子命令改档位并核对 MCP、status.json（实现指南 §8 风格）。"""
     with serve_process(tmp_path, "fast") as info:
         base, key, token = info["base"], info["key"], info["token"]
         port = base.rsplit(":", 1)[1]
@@ -1040,25 +1044,29 @@ def test_set_fps_and_config_against_real_server(
         assert cli.main(["config", "--port", port, "--token", token, "--json"]) == 0
         config = json.loads(capsys.readouterr().out)
         assert (config["mode"], config["fast_fps"], config["frame_duration_ms"]) == ("fast", 4.0, 125)
+        assert config["device_fps"] == 1.5
         assert config["canvas"] == list(CANVAS) and config["color_mode"] == "gray"
 
         # token 来自环境变量 GLASSCAST_TOKEN
         monkeypatch.setenv("GLASSCAST_TOKEN", token)
         assert cli.main(["set-fps", "2", "--port", port]) == 0
         out = capsys.readouterr().out
-        assert "每秒 4 → 2 张" in out and "hops 12 → 25" in out and "新的 hops" in out
+        assert "流畅模式档位：4 → 2（真机约每秒 1.5 → 1 帧，cast-emit 页面 hops 12 → 25），当前流畅模式" in out
+        assert "新的 hops" in out
 
         with httpx.Client(base_url=base, timeout=5.0) as client:
             status = client.get(f"/s/{key}/status.json").json()
             assert (status["fast_fps"], status["fast_frame_duration_ms"]) == (2.0, 250)
-            assert _mcp_call(client, token, "cast_status", {})["fast_fps"] == 2.0
+            status_result = _mcp_call(client, token, "cast_status", {})
+            assert (status_result["fast_fps"], status_result["device_fps"]) == (2.0, 1.0)
             # 不带 fps：用电脑上刚改的 2 → 250；带 fps=6 → 83
             assert _mcp_call(client, token, "start_cast", {"mode": "fast"})["frame_duration_ms"] == 250
             assert _mcp_call(client, token, "start_cast", {"mode": "fast", "fps": 6})["frame_duration_ms"] == 83
 
         assert cli.main(["config", "--port", port]) == 0
         out = capsys.readouterr().out
-        assert "每秒 6 张" in out and "frame_duration_ms=83" in out and "启动时 4" in out and "640×290" in out
+        assert "流畅档位" in out and "640×290" in out
+        assert "6 档（真机约每秒 1.5 帧），frame_duration_ms=83（启动时 4；可调 1～10：glasscast set-fps N）" in out
 
         # 越界在本地就拒绝（与服务端同一个规则），argparse 退出码 2
         with pytest.raises(SystemExit) as excinfo:
@@ -1100,16 +1108,21 @@ def test_admin_cli_with_mock_transport(monkeypatch: pytest.MonkeyPatch, capsys: 
             "success": True,
             "mode": "image",
             "fast_fps": 5.0,
+            "device_fps": 1.5,
             "frame_duration_ms": 100,
             "previous_fast_fps": 4.0,
+            "previous_device_fps": 1.5,
             "previous_frame_duration_ms": 125,
+            "hops": 10,
+            "previous_hops": 12,
             "warnings": ["提醒一下"],
-            "message": "下次切到流畅模式时按这个帧率投屏",
+            "message": "下次切到流畅模式时按这个档位投屏",
         },
     )
     assert cli.main(["set-fps", "5", "--host", "localhost", "--port", "9200", "--token", "cli-token"]) == 0
     out = capsys.readouterr().out
-    assert "每秒 4 → 5 张" in out and "当前普通模式" in out and "注意：提醒一下" in out
+    assert "流畅模式档位：4 → 5（真机约每秒 1.5 → 1.5 帧，cast-emit 页面 hops 12 → 10），当前普通模式" in out
+    assert "下次切到流畅模式时按这个档位投屏" in out and "注意：提醒一下" in out
     assert str(seen[-1].url) == "http://localhost:9200/admin/fps"
     assert seen[-1].headers["authorization"] == "Bearer cli-token"  # 命令行优先于环境变量
 

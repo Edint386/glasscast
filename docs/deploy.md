@@ -611,7 +611,7 @@ curl -sSI https://<随机>.trycloudflare.com/healthz | grep -i alt-svc
 
 手机和电脑在同一个 Wi-Fi 时，图片本来要绕「手机 → VPS → SSH 隧道 → 电脑」一圈，跨境时每张要 0.4～0.7 s。方案 D 让手机直接从电脑取图，局域网里一张图约 15 ms。
 
-真机上每张图还有约 0.65 s 的固定开销（手机经蓝牙传给眼镜、眼镜解码），所以这个方案改善的是延迟和稳定性，**不能**突破每秒 1.5～2 张的上限。
+真机上每张图还有约 0.65 s 的固定开销（手机经蓝牙传给眼镜、眼镜解码），所以这个方案改善的是延迟和稳定性，**不能**突破每秒约 1.5 帧的上限。
 
 ```
  千问平台（MCP）                 ─► 公网 DNS ─► VPS ─► SSH 隧道 ─► 电脑 glasscast     不变
@@ -769,7 +769,7 @@ curl -sSI https://<随机>.trycloudflare.com/healthz | grep -i alt-svc
 - **图片地址里的 key 等于看屏口令**：拿到完整地址的人就能看到你的屏幕，眼镜发不了请求头，图片只靠它保护。不要外传地址和带地址的日志。怀疑泄露就重启 glasscast；固定了 `GLASSCAST_CAST_KEY` 的话换一个新的。
 - **日志**：`deploy/` 里的配置都关了访问日志（方案 A 的 vhost、方案 B 的 `/s/`、1Panel 的 `root.conf`）。但隧道断开导致 502 / 504 时，`error_log` 会记下请求行，里面有 key，这份日志要当密码对待：系统 nginx 的日志文件是 0640（root 和 adm 组），`--flavor 1panel` 的日志目录是 0700。
 - **隧道端口不应该对外**：18766 是明文 HTTP，直通 glasscast，绕过 TLS 和 nginx 的所有限制。它只绑回环；`tunnel.sh --remote-bind` 拒绝 `0.0.0.0`；不要在安全组里放行它。
-- **`/admin/` 只在本机可用**：反代返回 404，glasscast 自己还要求与 `/mcp` 相同的 Bearer Token。眼镜上调帧率走 MCP 的 `start_cast(mode="fast", fps=N)`。方案 C 和方案 D 没有这条 404 规则，只靠 Token。
+- **`/admin/` 只在本机可用**：反代返回 404，glasscast 自己还要求与 `/mcp` 相同的 Bearer Token。眼镜上调档位走 MCP 的 `start_cast(mode="fast", fps=N)`。方案 C 和方案 D 没有这条 404 规则，只靠 Token。
 - **Token** 只放在 `.env` 和平台插件配置里。不要写进 SKILL.md、页面、data.json，不要提交到 git，不要把含密钥的技能发布到公开市场。技能用「个人私有」范围发布。
 - **glasscast 只监听 `127.0.0.1`**，不要改成 `0.0.0.0`。
 - **MCP 的 Host 校验**（DNS 重绑定保护）只放行 `--public-url` 里的主机和本机回环。不要为了省事关掉它（`GLASSCAST_DNS_REBINDING_PROTECTION=0`），需要多放行一个 Host 时用 `GLASSCAST_ALLOWED_HOSTS` 或 `--allowed-host`。

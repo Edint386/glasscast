@@ -202,12 +202,14 @@ def test_initialize_and_list_tools(make_app: Callable[..., tuple[Starlette, Cast
                 assert field in start_props, field
             assert start_props["frame_duration_ms"]["type"] == "integer"
             assert start_props["fps"]["type"] == "number" and start_props["fast_fps"]["type"] == "number"
+            assert start_props["device_fps"]["type"] == "number"
             assert "clip_url" not in start_props and "clip_frames" not in start_props
             assert "previous_mode" in tools["stop_cast"].output_schema["properties"]  # type: ignore[index]
             status_props = tools["cast_status"].output_schema["properties"]  # type: ignore[index]
             for field in ("active", "mode", "last_frame_age_s", "seq", "consecutive_errors", "frame_duration_ms"):
                 assert field in status_props, field
             assert status_props["fast_fps"]["type"] == "number"
+            assert status_props["device_fps"]["type"] == "number"
             assert status_props["fast_frame_duration_ms"]["type"] == "integer"
             assert "fast" in tools["start_cast"].description and "流畅" in tools["start_cast"].description
             # 描述交给大模型选工具（官方文档第 37 节 §5.4）：fps 的含义、范围、"换档后带新 hops 再打开一次页面"都要写
@@ -216,6 +218,12 @@ def test_initialize_and_list_tools(make_app: Callable[..., tuple[Starlette, Cast
             assert "再打开一次" in start_description and "快一点" in start_description
             assert "cast-emit" in start_description and "自动打开" not in start_description
             assert "fast_fps" in tools["cast_status"].description
+            assert "device_fps" in tools["cast_status"].description and "device_fps" in start_description
+            # 档位不是帧数，要说清楚；用户说的"N 帧""N 档"都要能触发调档
+            assert "档位不是帧数" in start_description and "档位 4 真机约每秒 1.5 帧" in start_description
+            assert "投屏调到 N 档" in start_description and "投屏调到 N 帧" in start_description
+            assert "档位不是帧数" in fps["description"] and "档位 4 真机约每秒 1.5 帧" in fps["description"]
+            assert "投屏调到 N 档" in init.instructions and "投屏调到 N 帧" in init.instructions
 
     run(scenario)
 
@@ -242,10 +250,11 @@ def test_full_cast_flow(make_app: Callable[..., tuple[Starlette, CastPipeline, S
                 "width": 640,
                 "height": 290,
                 "frame_duration_ms": 1000,  # image：页面 <tick> 每秒一次
-                "fps": 4.0,  # 流畅模式的当前帧率（image 模式也带上，fps 参数被忽略）
+                "fps": 4.0,  # 流畅模式的当前档位（image 模式也带上，fps 参数被忽略）
                 "fast_fps": 4.0,
+                "device_fps": 1.5,  # 4 档估算的真机帧数（image 模式也报流畅模式的值）
                 "hops": 12,  # cast-emit 页面跳数 round(1000/4/20)（research.md §9.8）
-                "page_fps": 4.2,  # 1000/(12×20)
+                "page_fps": 4.2,  # 旧估算 1000/(12×20)
                 "previous_mode": "off",
                 "first_frame": True,
                 "message": "投屏已开始，每秒刷新一次",
@@ -281,6 +290,7 @@ def test_full_cast_flow(make_app: Callable[..., tuple[Starlette, CastPipeline, S
             assert status["mode"] == "fast"
             assert status["message"] == "正在投屏，流畅模式，画面刚刚更新"
             assert status["frame_duration_ms"] == 125
+            assert status["device_fps"] == 1.5
 
             back = await call(session, "start_cast", {"mode": "image"})
             assert back["message"] == "已切换到普通模式" and back["frame_duration_ms"] == 1000
@@ -301,10 +311,10 @@ def test_full_cast_flow(make_app: Callable[..., tuple[Starlette, CastPipeline, S
 
 
 @pytest.mark.parametrize(
-    ("fast_fps", "frame_duration_ms", "hops", "page_fps"),
-    # hops = round(1000/fast_fps/20)，限制在 1～25；page_fps = 1000/(hops×20)。
-    # 2 张/秒正好是 25 跳；更低的帧率页面仍按 2 张/秒拉图（截帧只有 fast_fps，多拉的是重复帧）
-    [(4.0, 125, 12, 4.2), (5.0, 100, 10, 5.0), (2.0, 250, 25, 2.0), (0.25, 1000, 25, 2.0)],
+    ("fast_fps", "frame_duration_ms", "hops", "page_fps", "device_fps"),
+    # hops = round(1000/fast_fps/20)，限制在 1～25；page_fps = 1000/(hops×20) 是旧估算；device_fps 按 hops 估算真机帧数。
+    # 2 档正好是 25 跳；更低的档位 hops 不再变，只降低电脑截帧频率
+    [(4.0, 125, 12, 4.2, 1.5), (5.0, 100, 10, 5.0, 1.5), (2.0, 250, 25, 2.0, 1.0), (0.25, 1000, 25, 2.0, 1.0)],
 )
 def test_start_fast_from_off(
     make_app: Callable[..., tuple[Starlette, CastPipeline, Settings]],
@@ -312,6 +322,7 @@ def test_start_fast_from_off(
     frame_duration_ms: int,
     hops: int,
     page_fps: float,
+    device_fps: float,
 ) -> None:
     app, pipeline, settings = make_app(fast_fps=fast_fps)
 
@@ -330,13 +341,14 @@ def test_start_fast_from_off(
         "height": 290,
         # 页面 cast-fast 的 frame-duration 绑定它：2 帧一轮，round(1000/fast_fps/2)，上限 1000（实现指南 §9.1）
         "frame_duration_ms": frame_duration_ms,
-        "fps": fast_fps,  # 本次实际生效的流畅模式帧率
+        "fps": fast_fps,  # 本次实际生效的流畅模式档位
         "fast_fps": fast_fps,
+        "device_fps": device_fps,
         "hops": hops,  # cast-emit 页面跳数（research.md §9.8）
         "page_fps": page_fps,
         "previous_mode": "off",
         "first_frame": True,
-        "message": f"投屏已开始（流畅模式），每秒约 {fast_fps:g} 帧",
+        "message": f"投屏已开始（流畅模式），{fast_fps:g} 档，每秒约 {device_fps:g} 帧",
     }
     assert started["timer_url"] == settings.timer_url
     assert pipeline.mode == "fast"
@@ -569,6 +581,24 @@ def wait_for_errors(pipeline: CastPipeline, count: int) -> None:
     while pipeline.stats()["consecutive_errors"] < count:
         assert time.monotonic() < deadline, "等待采集失败超时"
         time.sleep(0.005)
+
+
+def test_start_cast_retry_with_fps_reports_level_and_rate(
+    make_app: Callable[..., tuple[Starlette, CastPipeline, Settings]],
+) -> None:
+    source = FlakySource(failures=1)
+    app, pipeline, _ = make_app(source, error_backoff_s=5.0, error_backoff_max_s=5.0, first_frame_timeout_s=0.8)
+    pipeline.start("fast")
+    wait_for_errors(pipeline, 1)
+
+    async def scenario() -> dict[str, Any]:
+        async with mcp_session(app) as session:
+            await session.initialize()
+            return await call(session, "start_cast", {"mode": "fast", "fps": 2.5})
+
+    result = run(scenario)
+    assert result["success"] is True
+    assert result["message"] == "投屏已重新开始（流畅模式），2.5 档，每秒约 1.3 帧"
 
 
 def test_start_cast_same_mode_retries_after_errors(
@@ -895,7 +925,7 @@ def test_mode_labels() -> None:
 
 @pytest.mark.parametrize(("mode", "expected"), [("fast", 125), ("image", 1000), ("off", 200), ("clip", 200)])
 def test_cast_status_frame_duration_follows_mode(mode: str, expected: int) -> None:
-    """字段与第一版相同；frame_duration_ms 与 start_cast 出参同义（fast 定时器帧时长 / image 1000）。"""
+    """第一版的字段都保留；frame_duration_ms 与 start_cast 出参同义（fast 定时器帧时长 / image 1000）。"""
     result = CastController(make_settings(), FakePipeline(mode=mode)).cast_status()  # type: ignore[arg-type]
     assert result["frame_duration_ms"] == expected
     assert set(result) == {
@@ -912,11 +942,12 @@ def test_cast_status_frame_duration_follows_mode(mode: str, expected: int) -> No
         "clip_frames",
         "frame_duration_ms",
         "fast_fps",
+        "device_fps",
         "fast_frame_duration_ms",
         "message",
     }
-    # 流畅模式的帧率与帧时长与当前模式无关（"快一点 / 慢一点"据此加减）
-    assert (result["fast_fps"], result["fast_frame_duration_ms"]) == (4.0, 125)
+    # 流畅模式的档位、真机帧数估算和帧时长与当前模式无关（"快一点 / 慢一点"据此加减）
+    assert (result["fast_fps"], result["device_fps"], result["fast_frame_duration_ms"]) == (4.0, 1.5, 125)
 
 
 def test_structured_content_matches_text_for_every_shape() -> None:
@@ -956,7 +987,7 @@ def test_structured_content_matches_text_for_every_shape() -> None:
 
 
 def test_descriptions_follow_fast_fps() -> None:
-    """工具描述交给大模型选工具（官方文档第 37 节 §5.4）：fast 的帧率按实际 --fast-fps 写，不留占位符。"""
+    """工具描述交给大模型选工具（官方文档第 37 节 §5.4）：fast 的档位和真机帧数按实际 --fast-fps 写，不留占位符。"""
     pipeline = CastPipeline(SyntheticSource(), fast_fps=2.5)
     try:
         server = build_mcp_server(make_settings(), pipeline)
@@ -965,20 +996,22 @@ def test_descriptions_follow_fast_fps() -> None:
             return list(await server.list_tools())
 
         start = next(tool for tool in run(scenario) if tool.name == "start_cast")
-        assert "每秒约 2.5 张" in start.description
-        assert "{fast_fps}" not in start.description
+        rate = "默认 2.5 档，每秒约 1.3 帧"
+        assert rate in start.description
         mode = start.input_schema["properties"]["mode"]
-        assert "2.5" in mode["description"] and "{fast_fps}" not in mode["description"]
-        assert "{fast_fps}" not in (server.instructions or "") and "2.5" in (server.instructions or "")
+        assert rate in mode["description"]
+        assert rate in (server.instructions or "")
+        for text in (start.description, mode["description"], server.instructions or ""):
+            assert "{fast_fps}" not in text and "{device_fps}" not in text
     finally:
         pipeline.close()
 
 
-# --------------------------------------------------------------------------- start_cast 的 fps 参数（语音调帧率）
+# --------------------------------------------------------------------------- start_cast 的 fps 参数（语音调档位）
 
 
 def test_start_cast_fps_sets_runtime_fast_fps(make_app: Callable[..., tuple[Starlette, CastPipeline, Settings]]) -> None:
-    """fps 合法：先写入运行时 fast_fps 再开始；之后不带 fps 的调用、停止后重开都沿用新帧率（运行时持久）。"""
+    """fps 合法：先写入运行时 fast_fps 再开始；之后不带 fps 的调用、停止后重开都沿用新档位（运行时持久）。"""
     app, pipeline, settings = make_app()
 
     async def scenario() -> dict[str, dict[str, Any]]:
@@ -1002,7 +1035,7 @@ def test_start_cast_fps_sets_runtime_fast_fps(make_app: Callable[..., tuple[Star
     assert first["success"] is True and first["mode"] == "fast"
     assert first["frame_duration_ms"] == 83  # round(1000 / 6 / 2)
     assert first["fps"] == first["fast_fps"] == 6.0
-    assert first["message"] == "投屏已开始（流畅模式），每秒约 6 帧"
+    assert first["message"] == "投屏已开始（流畅模式），6 档，每秒约 1.5 帧"
     assert first["timer_url"] == settings.timer_url and first["first_frame"] is True
     status = out["status"]
     assert (status["fast_fps"], status["fast_frame_duration_ms"], status["frame_duration_ms"]) == (6.0, 83, 83)
@@ -1010,16 +1043,18 @@ def test_start_cast_fps_sets_runtime_fast_fps(make_app: Callable[..., tuple[Star
     for name in ("again", "null"):
         assert out[name]["success"] is True and out[name]["frame_duration_ms"] == 83 and out[name]["fps"] == 6.0
     assert out["again"]["message"] == "投屏已在进行中（流畅模式）"
-    # 已在流畅模式时换档：成功（模型随后带新的 hops 再打开一次 cast-emit），message 说新帧率
+    # 已在流畅模式时换档：成功（模型随后带新的 hops 再打开一次 cast-emit），message 说新档位和真机帧数
     assert out["retune"]["frame_duration_ms"] == 200 and out["retune"]["fps"] == 2.5
-    assert out["retune"]["message"] == "流畅模式已调到每秒约 2.5 帧"
-    # 每次出参的 hops 都按调用之后生效的帧率重算：round(1000/fps/20)
+    assert out["retune"]["message"] == "流畅模式已调到 2.5 档，每秒约 1.3 帧"
+    # 每次出参的 hops 和 device_fps 都按调用之后生效的档位重算：round(1000/fps/20)
     assert [out[k]["hops"] for k in ("first", "again", "retune", "text", "back")] == [8, 8, 20, 17, 10]
+    assert [out[k]["device_fps"] for k in ("first", "again", "retune", "text", "back")] == [1.5, 1.5, 1.3, 1.5, 1.5]
+    assert status["device_fps"] == 1.5
     assert out["text"]["fps"] == 3.0 and out["text"]["frame_duration_ms"] == 167  # 数字字符串也接受
     assert out["stop"]["success"] is True
     assert out["reopen"]["fps"] == 3.0 and out["reopen"]["frame_duration_ms"] == 167  # 停止后重开仍是 3
     assert out["to_image"]["frame_duration_ms"] == 1000 and out["to_image"]["fps"] == 3.0
-    assert out["back"]["message"] == "已切换到流畅模式，每秒约 5 帧" and out["back"]["frame_duration_ms"] == 100
+    assert out["back"]["message"] == "已切换到流畅模式，5 档，每秒约 1.5 帧" and out["back"]["frame_duration_ms"] == 100
     assert (pipeline.fast_fps, pipeline.fast_frame_duration_ms, pipeline.mode) == (5.0, 100, "fast")
 
 
@@ -1036,9 +1071,37 @@ def test_start_cast_hops_follow_emit_hop_ms(make_app: Callable[..., tuple[Starle
     assert (result["hops"], result["page_fps"]) == (6, 4.2)  # round(1000/4/40) = 6；1000/(6×40) ≈ 4.2
 
 
-@pytest.mark.parametrize(("fps", "frame_duration_ms"), [(1, 500), (2, 250), (2.5, 200), (4, 125), (6, 83), (10, 50)])
+def test_device_fps_follows_hops_not_the_level(make_app: Callable[..., tuple[Starlette, CastPipeline, Settings]]) -> None:
+    """device_fps 按实际下发的 hops 估算：改了 emit_hop_ms，同样的 4 档真机帧数也跟着变。"""
+    app, _, _ = make_app(settings=make_settings(emit_hop_ms=10))
+
+    async def scenario() -> list[dict[str, Any]]:
+        async with mcp_session(app) as session:
+            await session.initialize()
+            return [await call(session, "start_cast", {"mode": "fast", "fps": 4}), await call(session, "cast_status")]
+
+    started, status = run(scenario)
+    assert (started["hops"], started["device_fps"], status["device_fps"]) == (25, 1.0, 1.0)  # round(1000/4/10) 截到 25
+    assert started["message"] == "投屏已开始（流畅模式），4 档，每秒约 1 帧"
+
+
+@pytest.mark.parametrize(
+    ("fps", "frame_duration_ms", "device_fps", "rate"),
+    [
+        (1, 500, 1.0, "1 档，每秒约 1 帧"),
+        (2, 250, 1.0, "2 档，每秒约 1 帧"),
+        (2.5, 200, 1.3, "2.5 档，每秒约 1.3 帧"),
+        (4, 125, 1.5, "4 档，每秒约 1.5 帧"),
+        (6, 83, 1.5, "6 档，每秒约 1.5 帧"),
+        (10, 50, 1.5, "10 档，每秒约 1.5 帧"),
+    ],
+)
 def test_start_cast_fps_frame_duration_mapping(
-    make_app: Callable[..., tuple[Starlette, CastPipeline, Settings]], fps: float, frame_duration_ms: int
+    make_app: Callable[..., tuple[Starlette, CastPipeline, Settings]],
+    fps: float,
+    frame_duration_ms: int,
+    device_fps: float,
+    rate: str,
 ) -> None:
     """frame_duration_ms = round(1000/fps/2)，页面 cast-fast 的 frame-duration 绑定它（research.md §9.2 E9）。"""
     app, pipeline, _ = make_app()
@@ -1052,11 +1115,13 @@ def test_start_cast_fps_frame_duration_mapping(
     assert result["success"] is True
     assert result["frame_duration_ms"] == frame_duration_ms == pipeline.fast_frame_duration_ms
     assert result["fps"] == result["fast_fps"] == float(fps)
+    assert result["device_fps"] == device_fps
+    assert result["message"] == f"投屏已开始（流畅模式），{rate}"
 
 
 @pytest.mark.parametrize("bad", [0, 0.5, 11, 100, -2, "abc", True, [6]])
 def test_start_cast_rejects_bad_fps(make_app: Callable[..., tuple[Starlette, CastPipeline, Settings]], bad: object) -> None:
-    """fps 非法：success=false、中文 message 说明范围、error 带细节；不开始投屏、不改帧率、不钳制。"""
+    """fps 非法：success=false、中文 message 说明范围、error 带细节；不开始投屏、不改档位、不钳制。"""
     app, pipeline, _ = make_app()
 
     async def scenario() -> dict[str, Any]:
@@ -1067,9 +1132,10 @@ def test_start_cast_rejects_bad_fps(make_app: Callable[..., tuple[Starlette, Cas
     result = run(scenario)
     assert result["success"] is False  # ui_schema 的 Hook 不命中，不重开页面
     assert result["mode"] == "fast"
-    assert "每秒 1 到 10 张" in result["message"] and "现在是每秒 4 张" in result["message"]
+    assert result["message"] == "档位只能调到 1 到 10，可以带小数，现在是 4 档"
     assert result["error"] and "1～10" in result["error"]
     assert result["fast_fps"] == result["fps"] == 4.0
+    assert result["device_fps"] == 1.5
     assert pipeline.mode == "off"
     assert pipeline.fast_fps == 4.0
 
@@ -1095,7 +1161,7 @@ def test_start_cast_bad_fps_keeps_running_cast(
 def test_start_cast_image_mode_ignores_fps(
     make_app: Callable[..., tuple[Starlette, CastPipeline, Settings]], fps: object
 ) -> None:
-    """mode=image 时忽略 fps（合法与否都不看），返回体仍带流畅模式的当前帧率。"""
+    """mode=image 时忽略 fps（合法与否都不看），返回体仍带流畅模式的当前档位。"""
     app, pipeline, _ = make_app()
 
     async def scenario() -> dict[str, Any]:
@@ -1107,14 +1173,15 @@ def test_start_cast_image_mode_ignores_fps(
     assert result["success"] is True and result["mode"] == "image"
     assert result["frame_duration_ms"] == 1000
     assert result["fps"] == result["fast_fps"] == 4.0
-    assert result["message"] == "投屏已开始，每秒刷新一次（帧率只对流畅模式有效，普通模式固定每秒 1 张）"
+    assert result["device_fps"] == 1.5
+    assert result["message"] == "投屏已开始，每秒刷新一次（档位只对流畅模式有效，普通模式固定每秒 1 帧）"
     assert pipeline.fast_fps == 4.0 and pipeline.mode == "image"
 
 
 def test_start_cast_fps_with_default_mode_is_image(
     make_app: Callable[..., tuple[Starlette, CastPipeline, Settings]],
 ) -> None:
-    """不传 mode 时按规格是 image（默认），fps 被忽略；SKILL.md 要求调帧率时显式传 mode=fast。"""
+    """不传 mode 时按规格是 image（默认），fps 被忽略；SKILL.md 要求调档位时显式传 mode=fast。"""
     app, pipeline, _ = make_app()
 
     async def scenario() -> dict[str, Any]:
@@ -1140,6 +1207,6 @@ def test_cast_status_reports_runtime_fast_fps(make_app: Callable[..., tuple[Star
             return status, started
 
     status, started = run(scenario)
-    assert status["fast_fps"] == 2.0 and status["fast_frame_duration_ms"] == 250
-    assert status["mode"] == "off"  # 与当前模式无关：没在投屏时也报流畅模式的当前帧率
-    assert started["frame_duration_ms"] == 250 and started["fps"] == 2.0
+    assert status["fast_fps"] == 2.0 and status["fast_frame_duration_ms"] == 250 and status["device_fps"] == 1.0
+    assert status["mode"] == "off"  # 与当前模式无关：没在投屏时也报流畅模式的当前档位
+    assert started["frame_duration_ms"] == 250 and started["fps"] == 2.0 and started["device_fps"] == 1.0

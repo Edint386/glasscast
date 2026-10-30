@@ -1022,7 +1022,7 @@ def test_gray_clip_over_budget_is_quantized_to_gray(
     assert p.stats()["clip_quantized_colors"] in (64, 16)
 
 
-# --------------------------------------------------------------------------- 运行中修改 fast_fps（不重启调帧率）
+# --------------------------------------------------------------------------- 运行中修改 fast_fps（不重启调档位）
 
 
 @pytest.mark.parametrize(
@@ -1047,7 +1047,7 @@ def test_parse_fast_fps_rejects_without_clamping(bad: object) -> None:
 
 
 def test_parse_fast_fps_checks_frame_duration_floor(monkeypatch: pytest.MonkeyPatch) -> None:
-    """帧时长下限单独检查：将来放宽了帧率上限，round(1000/fps/2) < 41 的值仍会被拒绝。"""
+    """帧时长下限单独检查：将来放宽了档位上限，round(1000/fps/2) < 41 的值仍会被拒绝。"""
     monkeypatch.setattr(pipeline_module, "FAST_FPS_MAX", 30.0)
     assert parse_fast_fps(12) == 12.0  # round(41.67) = 42
     with pytest.raises(FastFpsError, match="41"):
@@ -1056,7 +1056,9 @@ def test_parse_fast_fps_checks_frame_duration_floor(monkeypatch: pytest.MonkeyPa
 
 def test_fast_fps_warnings() -> None:
     assert fast_fps_warnings(4) == []
-    assert any("堆积" in w for w in fast_fps_warnings(4.5))  # 大于 4 提醒：4 是真机实测稳定上限（research.md §9.20）
+    assert fast_fps_warnings(4.5) == [  # 大于 4 提醒：4 档是真机实测稳定上限（research.md §9.20）
+        "档位 4.5 偏高：真机可能换图比加载还快，画面卡住（research.md §9.20），建议 4 档或更低（真机约每秒 1.5 帧，是实测稳定上限）"
+    ]
 
 
 def test_fast_fps_setter_validates_and_updates_duration(caplog: pytest.LogCaptureFixture) -> None:
@@ -1074,10 +1076,10 @@ def test_fast_fps_setter_validates_and_updates_duration(caplog: pytest.LogCaptur
                 p.fast_fps = bad  # type: ignore[assignment]
         assert p.fast_settings() == (6.0, 83)  # 不合法：状态不变，也不钳制到边界
         assert p.set_fast_fps("2.5") == (2.5, 200)
-        assert p.mode == "off" and not p.running  # 改帧率不改变模式、不启动采集
+        assert p.mode == "off" and not p.running  # 改档位不改变模式、不启动采集
         with caplog.at_level(logging.WARNING, logger="glasscast.pipeline"):
             p.fast_fps = 9
-        assert any("堆积" in r.getMessage() for r in caplog.records)
+        assert any("档位 9 偏高" in r.getMessage() for r in caplog.records)
     finally:
         p.close()
 
@@ -1087,7 +1089,7 @@ def _gaps(stamps: list[float]) -> list[float]:
 
 
 def test_fast_fps_change_retimes_capture_immediately(make_pipeline: Callable[..., CastPipeline]) -> None:
-    """运行中改 fast_fps：截帧节拍立即按新帧率重排（不等完旧周期），调慢后也立刻变慢。"""
+    """运行中改 fast_fps：截帧节拍立即按新档位重排（不等完旧周期），调慢后也立刻变慢。"""
     p = make_pipeline(SyntheticSource(), fast_fps=1.0)
     p.start("fast")
     first = p.wait_for_snapshot(0, TIMEOUT)
@@ -1096,7 +1098,7 @@ def test_fast_fps_change_retimes_capture_immediately(make_pipeline: Callable[...
     p.fast_fps = 10
     assert p.fast_frame_duration_ms == 50
     snap = p.wait_for_snapshot(first.seq, timeout=0.7)
-    assert snap is not None, "改帧率后仍按旧的 1 s 周期等待"
+    assert snap is not None, "改档位后仍按旧的 1 s 周期等待"
     stamps = [time.monotonic()]
     for _ in range(5):
         snap = p.wait_for_snapshot(snap.seq, TIMEOUT)
@@ -1124,14 +1126,14 @@ def test_fast_fps_change_does_not_affect_image_mode(make_pipeline: Callable[...,
     p.fast_fps = 10
     assert p.wait_for_snapshot(first.seq, timeout=0.3) is None
     assert p.mode == "image"
-    p.start("fast")  # 切到 fast 后用新帧率
+    p.start("fast")  # 切到 fast 后用新档位
     snap = p.wait_for_snapshot(first.seq, TIMEOUT)
     assert snap is not None
     assert p.wait_for_snapshot(snap.seq, timeout=0.7) is not None
 
 
 def test_fast_fps_change_keeps_error_backoff(make_pipeline: Callable[..., CastPipeline]) -> None:
-    """截屏连续失败的退避期间改帧率，不会打断退避立即重试（只有 start_cast 的重启才打断）。"""
+    """截屏连续失败的退避期间改档位，不会打断退避立即重试（只有 start_cast 的重启才打断）。"""
     src = AlwaysFailing()
     p = make_pipeline(src, fast_fps=10.0, error_backoff_s=5.0, error_backoff_max_s=5.0)
     p.start("fast")
@@ -1147,7 +1149,7 @@ def test_emit_hops_for() -> None:
     from glasscast.pipeline import DEFAULT_EMIT_HOP_MS, EMIT_MAX_HOPS, emit_hops_for
 
     assert DEFAULT_EMIT_HOP_MS == 20.0 and EMIT_MAX_HOPS == 25
-    assert emit_hops_for(4) == 12  # 默认：模拟器实测 12 跳约 4.2 张/秒
+    assert emit_hops_for(4) == 12  # 默认：模拟器实测 12 跳约每秒 4.2 帧，真机见 device_fps_for
     assert emit_hops_for(10) == 5
     assert emit_hops_for(2) == 25  # 1000/2/20 = 25，正好是上限
     assert emit_hops_for(1) == 25  # 1000/20 = 50，截到 25
@@ -1156,3 +1158,36 @@ def test_emit_hops_for() -> None:
     for bad in (0, -1, float("nan")):
         with pytest.raises(ValueError):
             emit_hops_for(4, bad)
+
+
+@pytest.mark.parametrize(
+    ("hops", "device_fps"),
+    [(25, 1.0), (20, 1.3), (17, 1.5), (15, 1.5), (12, 1.5), (10, 1.5), (8, 1.5), (1, 1.5)],
+)
+def test_device_fps_for_hops(hops: int, device_fps: float) -> None:
+    """真机一步约 13 ms，每换一张图 hops × 3 步，每张图至少约 650 ms（research.md §9.19、§9.20）。"""
+    from glasscast.pipeline import device_fps_for
+
+    assert device_fps_for(hops) == device_fps
+
+
+@pytest.mark.parametrize(
+    ("level", "device_fps"),
+    [
+        (1, 1.0),
+        (1.5, 1.0),
+        (2, 1.0),
+        (2.5, 1.3),
+        (3, 1.5),
+        (3.3, 1.5),
+        (4, 1.5),
+        (5, 1.5),
+        (6, 1.5),
+        (10, 1.5),
+    ],
+)
+def test_device_fps_for_levels(level: float, device_fps: float) -> None:
+    """档位 → hops → 真机帧数：1～2 档约每秒 1 帧，3 档及以上约每秒 1.5 帧。"""
+    from glasscast.pipeline import device_fps_for, emit_hops_for
+
+    assert device_fps_for(emit_hops_for(level)) == device_fps

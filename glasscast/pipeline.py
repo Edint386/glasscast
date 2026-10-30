@@ -4,16 +4,16 @@
 
 - ``image``（普通模式，方案三）：眼镜页面 ``<tick>`` 每秒换一次地址，重新下载一张 JPEG。上限 1 fps
   （所有 tick 共享一个 1000 ms 定时器，research.md §2.2），所以 ``image_fps`` 默认 1。
-- ``fast``（流畅模式）：与 image 完全相同、同样产出 JPEG，只是截帧频率是 ``fast_fps``（默认 4）。
-  现行眼镜页面是 ``cast-emit``（emit:// 事件倒数，每换一张图倒数 ``hops × 3`` 步，research.md §9.19），
-  ``hops`` 由 MCP 层按 ``fast_fps`` 估算后下发（见 :data:`DEFAULT_EMIT_HOP_MS`）。真机上实际约每秒
-  ``fast_fps / 2`` 张，设 4 是实测的稳定上限（research.md §1 最终结论、§9.20）。
+- ``fast``（流畅模式）：与 image 完全相同、同样产出 JPEG，只是电脑每秒截 ``fast_fps`` 张（默认 4）。
+  ``fast_fps`` 是**档位**（1～10），不是真实帧数。现行眼镜页面是 ``cast-emit``（emit:// 事件倒数，每换一张图
+  倒数 ``hops × 3`` 步，research.md §9.19），``hops`` 由 MCP 层按档位换算后下发（见 :data:`DEFAULT_EMIT_HOP_MS`）。
+  真机每秒帧数用 :func:`device_fps_for` 估算：4 档约每秒 1.5 帧，是实测的稳定上限（research.md §1 最终结论、§9.20）。
   下面是旧页面 ``cast-fast`` 的机制（过不了平台保存校验 URI-001，只能在本地模拟器里用，research.md §9.4）：
   眼镜页面 ``cast-fast`` 用一个 2 帧的 `.fset` 当**定时器**（:func:`~glasscast.frames.build_timer_fset`），
   每播完一轮触发 ``data://update`` 重新下载一张图（research.md §9.2 E4、E9）：一轮 = 2 × ``frame-duration``，
   所以页面的 ``frame-duration`` 应为 :func:`fast_frame_duration_for` 算出的 ``round(1000 / fast_fps / 2)``。
   ``fast_fps`` 可以在运行中修改（:attr:`CastPipeline.fast_fps` 的 setter，MCP ``start_cast(fps=…)`` 与
-  ``POST /admin/fps`` 都走它）：截帧节拍立即按新帧率重排；合法范围 :data:`FAST_FPS_MIN`～:data:`FAST_FPS_MAX`，
+  ``POST /admin/fps`` 都走它）：截帧节拍立即按新档位重排；合法范围 :data:`FAST_FPS_MIN`～:data:`FAST_FPS_MAX`，
   超出一律拒绝（:func:`parse_fast_fps`），不静默钳制。眼镜页面的 ``frame-duration`` 只在页面打开时绑定一次
   （research.md §9.2 E9），所以页面要等下一次 ``start_cast`` 重新打开后才按新节拍拉图。
 - ``clip``（方案一，**仅内部实验**）：攒满 ``clip_frames`` 帧打包成 `.fset` 发布，只保留最新一段。
@@ -74,6 +74,9 @@ __all__ = [
     "CLIP_COLOR_LADDER",
     "CLIP_RELAX_AFTER_SEGMENTS",
     "DEFAULT_FAST_FPS",
+    "DEVICE_IMAGE_COST_MS",
+    "DEVICE_STEP_MS",
+    "EMIT_STEPS_PER_HOP",
     "FAST_FPS_MAX",
     "FAST_FPS_MIN",
     "FAST_FPS_RANGE_TEXT",
@@ -92,6 +95,7 @@ __all__ = [
     "Snapshot",
     "fast_fps_warnings",
     "emit_hops_for",
+    "device_fps_for",
     "DEFAULT_EMIT_HOP_MS",
     "EMIT_MAX_HOPS",
     "EMIT_HOP_MS_MIN",
@@ -115,28 +119,34 @@ ClipFormat = Literal["png", "jpeg"]
 #: ``<frame-set>`` 的 ``frame-duration`` 最大 1000 ms，超过被截断（官方文档第 36 节 §3.3 帧合集；research.md §2.4）
 MAX_FRAME_DURATION_MS = 1000
 #: ``frame-duration`` 的下限 41 ms：官方文档第 36 节 §3.3 帧合集属性表写的是"默认 41"，没写更小的值是否被接受，
-#: 这里按下限处理（保守），运行时改帧率时 round(1000/fps/2) 低于它一律拒绝（research.md §2.4）
+#: 这里按下限处理（保守），运行时改档位时 round(1000/fps/2) 低于它一律拒绝（research.md §2.4）
 MIN_FRAME_DURATION_MS = 41
-#: fast 模式默认截帧频率：模拟器里帧合集定时器可到 4～5 fps（research.md §9.2 E4、§9.3），真机受带宽限制
+#: fast 模式默认档位（电脑每秒截 4 张）：模拟器里帧合集定时器可到 4～5 fps（research.md §9.2 E4、§9.3），
+#: 真机约每秒 1.5 帧（research.md §9.20）
 DEFAULT_FAST_FPS = 4.0
 #: 换算 hops 用的每跳毫秒数：hops = round(1000 / fast_fps / emit_hop_ms)。这个换算是按第一版 emit 自环页面
 #: （每 hops 跳换一张图，research.md §9.8）定的；现行 cast-emit 页面每换一张图倒数 hops × 3 步（research.md §9.19），
-#: 真机每步约 13 ms 外加每张图的下载和蓝牙开销，所以真机实际张数低于 fast_fps（设 4 约每秒 1.5 张，
-#: 是实测的稳定上限）。可以用 GLASSCAST_EMIT_HOP_MS / --emit-hop-ms 调整，不用改页面。
+#: 真机每步约 13 ms 外加每张图的下载和蓝牙开销，所以真机帧数低于档位（4 档约每秒 1.5 帧，
+#: 是实测的稳定上限，见 :func:`device_fps_for`）。可以用 GLASSCAST_EMIT_HOP_MS / --emit-hop-ms 调整，不用改页面。
 DEFAULT_EMIT_HOP_MS = 20.0
 EMIT_HOP_MS_MIN = 5.0
 EMIT_HOP_MS_MAX = 500.0
 #: start_cast 下发的 hops 上限；cast-emit 页面每换一张图倒数 hops × 3 步，缺 hops 时也按 25（75 步）。
-#: 低于下限的 fast_fps 只降低截帧频率，页面拉图仍按下限（出参 page_fps 报告的是按 emit_hop_ms 估算的值）
+#: hops 到上限之后再调低档位只降低电脑截帧频率，页面换图节拍不再变（出参 page_fps 是按 emit_hop_ms 算的旧估算）
 EMIT_MAX_HOPS = 25
-#: 流畅模式帧率的合法范围（每秒张数，含端点，可以带小数）。上限 10 → frame_duration_ms 50，仍高于
-#: :data:`MIN_FRAME_DURATION_MS`；下限 1 → 500，与普通模式（每秒 1 张）持平，再低就没有"流畅"可言。
+#: 真机上倒数一步约 13 ms，每换一张图倒数 hops × 3 步（research.md §9.19、§9.20）
+DEVICE_STEP_MS = 13.0
+EMIT_STEPS_PER_HOP = 3
+#: 手机下载、蓝牙传输和眼镜解码的固定开销，再快的节拍每张图也要这么久（research.md §9.20）
+DEVICE_IMAGE_COST_MS = 650.0
+#: 流畅模式档位的合法范围（含端点，可以带小数）。上限 10 → frame_duration_ms 50，仍高于
+#: :data:`MIN_FRAME_DURATION_MS`；下限 1 → 500，真机约每秒 1 帧，与普通模式（每秒 1 帧）持平，再低就没有"流畅"可言。
 #: 启动参数 ``--fast-fps``、MCP ``start_cast(fps=…)``、``POST /admin/fps`` 共用这一个范围
 FAST_FPS_MIN = 1.0
 FAST_FPS_MAX = 10.0
 #: 念给用户 / 打印给人看的范围写法
 FAST_FPS_RANGE_TEXT = f"{FAST_FPS_MIN:g}～{FAST_FPS_MAX:g}"
-#: fast_fps 超过它就提醒：设 4 是真机实测的稳定上限，4.5 以上可能卡住（research.md §9.20）
+#: 档位超过它就提醒：4 档是真机实测的稳定上限，4.5 以上可能卡住（research.md §9.20）
 FAST_FPS_WARN_ABOVE = 4.0
 #: image 模式页面的刷新间隔：``<tick refresh="second">`` 每秒一次（research.md §2.2），作为 start_cast 出参
 IMAGE_FRAME_DURATION_MS = 1000
@@ -149,7 +159,7 @@ CLIP_COLOR_LADDER: tuple[int | None, ...] = (None, 64, 16)
 #: 在某个量化档位上连续这么多段都没超预算，就试着退回上一档（画面变简单后恢复画质）
 CLIP_RELAX_AFTER_SEGMENTS = 5
 
-# 统计窗口：编码/采集耗时取最近 N 次的平均，实际帧率取最近 N 次采集的时间跨度
+# 统计窗口：编码/采集耗时取最近 N 次的平均，实际截帧频率取最近 N 次采集的时间跨度
 _STATS_WINDOW = 50
 
 
@@ -204,6 +214,13 @@ def emit_hops_for(fast_fps: float, emit_hop_ms: float = DEFAULT_EMIT_HOP_MS) -> 
     return max(1, min(EMIT_MAX_HOPS, round(1000.0 / fast_fps / float(emit_hop_ms))))
 
 
+def device_fps_for(hops: int) -> float:
+    """按 cast-emit 的跳数估算真机每秒显示的帧数，保留一位小数（research.md §9.20 的实测）。
+    这是正常显示时的估算，不能判断页面是否卡住。"""
+    interval_ms = max(hops * EMIT_STEPS_PER_HOP * DEVICE_STEP_MS, DEVICE_IMAGE_COST_MS)
+    return round(1000.0 / interval_ms, 1)
+
+
 def fast_frame_duration_for(fast_fps: float, timer_frames: int = TIMER_FRAMES) -> int:
     """fast 模式页面定时器的每帧时长 ``round(1000 / fast_fps / timer_frames)``，限制在 1～1000。
 
@@ -223,11 +240,11 @@ def _check_fps(fps: float, name: str) -> None:
 
 
 class FastFpsError(ValueError):
-    """流畅模式帧率不合法。消息是给人看的中文（含合法范围），可以直接打印或放进 HTTP 400 的 message。"""
+    """流畅模式档位不合法。消息是给人看的中文（含合法范围），可以直接打印或放进 HTTP 400 的 message。"""
 
 
 def parse_fast_fps(value: object) -> float:
-    """校验运行中要设置的流畅模式帧率，返回 float；不合法抛 :class:`FastFpsError`（不钳制）。
+    """校验运行中要设置的流畅模式档位，返回 float；不合法抛 :class:`FastFpsError`（不钳制）。
 
     - 接受 int / float，以及能解析成数字的字符串（大模型偶尔把数字填成 ``"6"``）；bool、None、NaN、无穷都拒绝。
     - 范围 :data:`FAST_FPS_MIN`～:data:`FAST_FPS_MAX`（含端点，可带小数，例如 2.5）。
@@ -235,38 +252,38 @@ def parse_fast_fps(value: object) -> float:
       之间（官方文档第 36 节 §3.3；research.md §2.4）。在上面的范围内恒成立，这里仍单独检查，防止以后改了范围。
     """
     if isinstance(value, bool) or value is None:
-        raise FastFpsError(f"帧率应为 {FAST_FPS_RANGE_TEXT} 之间的数字（每秒张数，可以带小数，例如 2.5），收到 {value!r}")
+        raise FastFpsError(f"档位应为 {FAST_FPS_RANGE_TEXT} 之间的数字（可以带小数，例如 2.5），收到 {value!r}")
     if isinstance(value, str):
         try:
             fps = float(value.strip())
         except ValueError:
             raise FastFpsError(
-                f"帧率应为 {FAST_FPS_RANGE_TEXT} 之间的数字（每秒张数，可以带小数，例如 2.5），收到 {value!r}"
+                f"档位应为 {FAST_FPS_RANGE_TEXT} 之间的数字（可以带小数，例如 2.5），收到 {value!r}"
             ) from None
     elif isinstance(value, (int, float)):
         try:
             fps = float(value)
         except OverflowError:
-            raise FastFpsError(f"帧率只能是 {FAST_FPS_RANGE_TEXT}（每秒张数），收到 {value!r}") from None
+            raise FastFpsError(f"档位只能是 {FAST_FPS_RANGE_TEXT}，收到 {value!r}") from None
     else:
-        raise FastFpsError(f"帧率应为 {FAST_FPS_RANGE_TEXT} 之间的数字（每秒张数，可以带小数，例如 2.5），收到 {value!r}")
+        raise FastFpsError(f"档位应为 {FAST_FPS_RANGE_TEXT} 之间的数字（可以带小数，例如 2.5），收到 {value!r}")
     if not math.isfinite(fps) or not FAST_FPS_MIN <= fps <= FAST_FPS_MAX:
-        raise FastFpsError(f"帧率只能是 {FAST_FPS_RANGE_TEXT}（每秒张数，可以带小数，例如 2.5），收到 {value!r}")
+        raise FastFpsError(f"档位只能是 {FAST_FPS_RANGE_TEXT}（可以带小数，例如 2.5），收到 {value!r}")
     duration = round(1000.0 / fps / TIMER_FRAMES)
     if not MIN_FRAME_DURATION_MS <= duration <= MAX_FRAME_DURATION_MS:
         raise FastFpsError(
-            f"帧率 {fps:g} 对应的页面定时器帧时长 {duration} ms 不在 {MIN_FRAME_DURATION_MS}～{MAX_FRAME_DURATION_MS} ms 之内"
+            f"档位 {fps:g} 对应的页面定时器帧时长 {duration} ms 不在 {MIN_FRAME_DURATION_MS}～{MAX_FRAME_DURATION_MS} ms 之内"
             "（官方文档第 36 节 §3.3 帧合集）"
         )
     return fps
 
 
 def fast_fps_warnings(fps: float) -> list[str]:
-    """能用但大概率不是你想要的流畅模式帧率（启动信息、``POST /admin/fps`` 的返回和日志共用）。"""
+    """能用但大概率不是你想要的流畅模式档位（启动信息、``POST /admin/fps`` 的返回和日志共用）。"""
     if fps > FAST_FPS_WARN_ABOVE:
         return [
-            f"fast_fps={fps:g} 很高：真机下载带宽多半跟不上，单张图下载慢于换图间隔时请求会堆积"
-            "（research.md §9.3），建议 4 或更低（真机实测稳定上限，4.5 以上可能卡住）"
+            f"档位 {fps:g} 偏高：真机可能换图比加载还快，画面卡住（research.md §9.20），"
+            "建议 4 档或更低（真机约每秒 1.5 帧，是实测稳定上限）"
         ]
     return []
 
@@ -286,8 +303,8 @@ class CastPipeline:
       （research.md §9.2 E6：屏幕单色绿，颜色没有意义）。
     - ``image_fps`` / ``jpeg_quality`` / ``jpeg_subsampling`` / ``jpeg_encoder``：image 模式（JPEG）；编码器见 :func:`~glasscast.frames.encode_jpeg`。
     - ``jpeg_target_bytes``：> 0 时每张图取体积不超过它的最高质量（``jpeg_quality`` 变成上限，:func:`~glasscast.frames.encode_jpeg_target`）；0 = 固定质量。
-    - ``fast_fps``：fast 模式截帧频率（默认 4）的**初始值**，其余与 image 模式相同；页面定时器帧时长见
-      :attr:`fast_frame_duration_ms`。构造时只要求正的有限数（单测用很高的帧率加速）；运行中用
+    - ``fast_fps``：fast 模式档位（默认 4，也是电脑每秒截图张数）的**初始值**，其余与 image 模式相同；页面定时器帧时长见
+      :attr:`fast_frame_duration_ms`。构造时只要求正的有限数（单测用很高的值加速）；运行中用
       :attr:`fast_fps` 的 setter 修改，按 :func:`parse_fast_fps` 的范围校验。
     - ``clip_fps`` / ``clip_frames`` / ``clip_format``：clip 模式（仅内部实验）；PNG 帧在 ``gray`` 下是
       8 位灰度（research.md §9.2 E6），在 ``rgb`` 下 ``clip_png_alpha=True`` 时编码为 RGBA，
@@ -463,7 +480,7 @@ class CastPipeline:
 
     @property
     def fast_fps(self) -> float:
-        """流畅模式当前的截帧频率（运行中可改，见 setter）。"""
+        """流畅模式当前的档位，也是电脑每秒截图张数（运行中可改，见 setter）。"""
         with self._cond:
             return self._fast_fps
 
@@ -483,12 +500,12 @@ class CastPipeline:
             return self._fast_fps, self._fast_frame_duration_ms
 
     def set_fast_fps(self, value: object) -> tuple[float, int]:
-        """运行中修改流畅模式帧率，返回生效后的 ``(fast_fps, fast_frame_duration_ms)``。
+        """运行中修改流畅模式档位，返回生效后的 ``(fast_fps, fast_frame_duration_ms)``。
 
         - 先按 :func:`parse_fast_fps` 校验（范围 :data:`FAST_FPS_MIN`～:data:`FAST_FPS_MAX`，帧时长 ≥ 41 ms），
           不合法抛 :class:`FastFpsError`，状态不变；不做钳制。
         - 立即影响 fast 模式的截帧节拍：采集线程被唤醒，从上一帧的计划时刻起按新周期重排下一帧
-          （从 1 fps 调到 10 fps 不用再等将近 1 秒；调慢时也不会补发积压的帧）。
+          （从 1 档调到 10 档不用再等将近 1 秒；调慢时也不会补发积压的帧）。
         - 不影响当前模式（image / off 时只是改了下次进入 fast 用的值），也不清空画面。
         - 眼镜上已经打开的 ``cast-fast`` 页面的 ``frame-duration`` 在打开时就绑定好了（research.md §9.2 E9），
           要等下一次 ``start_cast`` 重新打开页面才按新节拍拉图。
@@ -503,7 +520,7 @@ class CastPipeline:
                 self._rate_version += 1
                 self._cond.notify_all()
         if fps != previous:
-            log.info("流畅模式帧率 %g → %g（页面定时器帧时长 %d ms）", previous, fps, duration)
+            log.info("流畅模式档位 %g → %g（页面定时器帧时长 %d ms）", previous, fps, duration)
         for warning in fast_fps_warnings(fps):
             log.warning("%s", warning)
         return fps, duration
@@ -781,7 +798,7 @@ class CastPipeline:
         current_rate = -1
         buffer: list[_ClipFrame] = []  # clip 攒帧缓冲，只在本线程访问
         next_due = 0.0
-        # 上一帧的计划时刻（成功截帧后才有；出错退避期间为 None）。运行中改帧率时据此重排下一帧
+        # 上一帧的计划时刻（成功截帧后才有；出错退避期间为 None）。运行中改档位时据此重排下一帧
         last_due: float | None = None
         while True:
             try:
@@ -799,7 +816,7 @@ class CastPipeline:
                     next_due = time.monotonic()
                     last_due = None
                 elif rate != current_rate:
-                    # 运行中改了 fast_fps：从上一帧的计划时刻起按新周期重排下一帧，不等完按旧帧率算出的等待；
+                    # 运行中改了 fast_fps：从上一帧的计划时刻起按新周期重排下一帧，不等完按旧档位算出的等待；
                     # 已经过了就马上截，但不补发积压的帧。退避中（last_due 为 None）保持退避；
                     # image / clip 模式的节拍与 fast_fps 无关，不动
                     current_rate = rate
@@ -823,14 +840,14 @@ class CastPipeline:
                     continue
 
                 self._record_success()
-                # 固定节拍；落后超过一个周期就不再追帧，从现在重新计时。截帧期间帧率被改的话，
+                # 固定节拍；落后超过一个周期就不再追帧，从现在重新计时。截帧期间档位被改的话，
                 # 下一轮循环会看到新的 rate，按新周期重排
                 last_due = next_due
                 next_due += period
                 now = time.monotonic()
                 if next_due < now - period:
                     next_due = now
-                    last_due = now - period  # 保持 next_due = last_due + period，改帧率时从这里重排
+                    last_due = now - period  # 保持 next_due = last_due + period，改档位时从这里重排
             except Exception:  # noqa: BLE001 - 兜底：记账/日志本身出错也不能让线程死掉
                 log.exception("采集线程内部错误，%s 秒后继续", self._backoff_base)
                 try:
@@ -844,7 +861,7 @@ class CastPipeline:
             self._cond.wait_for(lambda: self._closed or self._gen != gen, timeout)
 
     def _wait_unless_changed(self, gen: int, rate: int, timeout: float) -> None:
-        """等待 ``timeout`` 秒；模式切换、关闭或帧率被修改时提前返回。"""
+        """等待 ``timeout`` 秒；模式切换、关闭或档位被修改时提前返回。"""
         with self._cond:
             self._cond.wait_for(lambda: self._closed or self._gen != gen or self._rate_version != rate, timeout)
 
